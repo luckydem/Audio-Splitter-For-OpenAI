@@ -12,6 +12,7 @@ venv.bak/
 *.egg-info/
 dist/
 build/
+.venv/
 
 # Audio files (test data)
 *.mp3
@@ -41,3 +42,4 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
