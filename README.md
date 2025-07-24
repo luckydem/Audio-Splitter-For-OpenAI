@@ -6,7 +6,7 @@ A Python script that splits large audio files into smaller chunks suitable for O
 
 - Splits audio files based on file size limits (default 20MB)
 - Supports multiple input formats: MP3, WAV, FLAC, OGG, M4A, WMA, and more
-- Outputs to MP3 format by default for maximum OpenAI compatibility
+- Outputs to M4A format by default for optimal OpenAI compatibility and compression
 - Configurable output format (MP3, WAV, M4A) and quality settings
 - Maintains n8n workflow compatibility with structured output
 - Smart chunk size calculation to prevent oversized files
@@ -47,7 +47,7 @@ python split_audio.py --input /path/to/audio.wma --output /path/to/output_dir
 
 With options:
 ```bash
-python split_audio.py --input audio.wma --output chunks/ --maxmb 20 --format mp3 --quality high --verbose
+python split_audio.py --input audio.wma --output chunks/ --maxmb 20 --format m4a --quality medium --verbose
 ```
 
 ### Options
@@ -55,9 +55,10 @@ python split_audio.py --input audio.wma --output chunks/ --maxmb 20 --format mp3
 - `--input`: Path to input audio file (required)
 - `--output`: Output directory for chunks (required)
 - `--maxmb`: Maximum size in MB per chunk (default: 20, max recommended: 25)
-- `--format`: Output format - mp3, wav, or m4a (default: mp3)
-- `--quality`: Audio quality - high, medium, or low (default: high)
+- `--format`: Output format - mp3, wav, or m4a (default: m4a)
+- `--quality`: Audio quality - high, medium, or low (default: medium)
 - `--verbose`: Show detailed processing information
+- `--no-log`: Disable logging to file (logs are enabled by default)
 
 ## n8n Integration
 
@@ -72,15 +73,49 @@ const filePaths = $('Execute Audio Splitter Script').first().json.stdout
 
 ## Output Quality Settings
 
-- **High**: 192 kbps, 44.1 kHz (recommended for transcription)
-- **Medium**: 128 kbps, 44.1 kHz
-- **Low**: 96 kbps, 22.05 kHz (smaller files, may affect transcription quality)
+- **High**: 192 kbps, 44.1 kHz (best quality, larger files)
+- **Medium**: 128 kbps, 44.1 kHz (recommended - good quality/size balance)
+- **Low**: 96 kbps, 22.05 kHz (smallest files, may affect transcription quality)
+
+**Note**: M4A format is ~30% more efficient than MP3, so M4A at medium quality often provides better results than MP3 at the same bitrate.
+
+## Logging
+
+The script automatically creates detailed logs in the `logs/` directory with timestamps. Each execution creates a new log file named `audio_splitter_YYYYMMDD_HHMMSS.log`.
+
+**Log contents include:**
+- Script execution details and parameters
+- Input file analysis results
+- Processing progress for each chunk
+- Error messages and warnings
+- Processing summary with file sizes
+- Performance metrics
+
+**Managing log files:**
+```bash
+# Keep logs from last 30 days
+python cleanup_logs.py --days 30
+
+# Keep only the 10 most recent log files
+python cleanup_logs.py --count 10
+```
+
+To disable logging, use the `--no-log` flag:
+```bash
+python split_audio.py --input audio.wma --output chunks/ --no-log
+```
+
+**Format Recommendations:**
+- **M4A (default)**: Best compression efficiency, smaller files, fully compatible with OpenAI
+- **MP3**: Universal compatibility, slightly larger files than M4A
+- **WAV**: Uncompressed, largest files but highest quality
 
 ## Troubleshooting
 
 1. **"No audio stream found in the file"**: The input file may be corrupted or not contain audio
 2. **Chunks exceed 25MB**: Try using `--quality medium` or `--quality low`
 3. **FFmpeg not found**: Ensure FFmpeg is installed and in your system PATH
+4. **Check the logs**: Look in the `logs/` directory for detailed error information
 
 ## License
 

@@ -21,6 +21,9 @@ import argparse
 import ffmpeg
 import sys
 from pathlib import Path
+import logging
+from datetime import datetime
+import json
 
 def get_audio_info(filepath):
     """
@@ -74,7 +77,7 @@ def validate_input_file(filepath):
     
     return True
 
-def split_audio(input_file, chunk_duration, output_dir, output_format='mp3', quality='high', verbose=False):
+def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', quality='medium', verbose=False, logger=None):
     """
     Use ffmpeg to split the audio file into chunks of chunk_duration seconds
     
@@ -82,14 +85,14 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='mp3', qua
         input_file: Path to input audio file
         chunk_duration: Duration of each chunk in seconds
         output_dir: Directory to save output chunks
-        output_format: Output format (default: mp3 for OpenAI compatibility)
+        output_format: Output format (default: m4a for OpenAI compatibility)
         quality: Audio quality setting ('high', 'medium', 'low')
         verbose: Show detailed output
     """
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
     
-    # Quality presets for MP3 (optimized for speech transcription)
+    # Quality presets (optimized for speech transcription)
     quality_settings = {
         'high': {'bitrate': '192k', 'sample_rate': '44100'},
         'medium': {'bitrate': '128k', 'sample_rate': '44100'},
@@ -97,6 +100,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='mp3', qua
     }
     
     settings = quality_settings.get(quality, quality_settings['high'])
+    
+    if not logger:
+        logger = logging.getLogger('audio_splitter')
     
     if verbose:
         print(f"Input format: {codec_name}", file=sys.stderr)
@@ -111,6 +117,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='mp3', qua
         
         # IMPORTANT: Maintain original stdout format for n8n compatibility
         print(f"Exporting {output_path}")
+        logger.info(f"Processing chunk {i+1}/{num_chunks}: {os.path.basename(output_path)}")
         
         try:
             # Build ffmpeg command based on output format
@@ -160,19 +167,63 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='mp3', qua
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
+                logger.error(f"FFmpeg failed for chunk {i+1}: {result.stderr[:500]}")
                 print(f"Warning: Error processing chunk {i+1}", file=sys.stderr)
                 if verbose:
                     print(f"FFmpeg error: {result.stderr}", file=sys.stderr)
             else:
+                file_size = os.path.getsize(output_path) / (1024 * 1024)
+                logger.info(f"Chunk {i+1} created successfully: {os.path.basename(output_path)} ({file_size:.1f} MB)")
                 successfully_created.append(output_path)
                 
         except Exception as e:
+            logger.error(f"Exception while creating chunk {i+1}: {str(e)}")
             print(f"Failed to create chunk {i+1}: {str(e)}", file=sys.stderr)
             continue
     
     return successfully_created
 
+def setup_logging():
+    """
+    Set up logging configuration with both file and console handlers
+    """
+    # Create logs directory if it doesn't exist
+    log_dir = Path(__file__).parent / 'logs'
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create log filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = log_dir / f'audio_splitter_{timestamp}.log'
+    
+    # Configure logging
+    logger = logging.getLogger('audio_splitter')
+    logger.setLevel(logging.DEBUG)
+    
+    # File handler - logs everything
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(file_formatter)
+    
+    # Console handler - only errors to stderr
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.ERROR)
+    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+    console_handler.setFormatter(console_formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger, log_file
+
 def main():
+    # Set up logging first
+    logger, log_file = setup_logging()
+    
     parser = argparse.ArgumentParser(
         description="Split audio files for OpenAI transcription API.",
         epilog="Supported formats: MP3, WAV, FLAC, OGG, M4A, WMA, and more. Outputs to MP3 by default."
@@ -181,12 +232,19 @@ def main():
     parser.add_argument('--output', required=True, help='Output directory')
     parser.add_argument('--maxmb', type=int, default=20, 
                        help='Max size in MB per chunk (default: 20, OpenAI limit: 25)')
-    parser.add_argument('--format', default='mp3', choices=['mp3', 'wav', 'm4a'],
-                       help='Output format (default: mp3 for best OpenAI compatibility)')
-    parser.add_argument('--quality', default='high', choices=['high', 'medium', 'low'],
-                       help='Audio quality (default: high)')
+    parser.add_argument('--format', default='m4a', choices=['mp3', 'wav', 'm4a'],
+                       help='Output format (default: m4a for best OpenAI compatibility and compression)')
+    parser.add_argument('--quality', default='medium', choices=['high', 'medium', 'low'],
+                       help='Audio quality (default: medium for good quality/size balance)')
     parser.add_argument('--verbose', action='store_true', help='Show detailed processing information')
+    parser.add_argument('--no-log', action='store_true', help='Disable logging to file')
     args = parser.parse_args()
+    
+    # Log script start
+    logger.info("="*60)
+    logger.info("Audio splitter script started")
+    logger.info(f"Log file: {log_file}")
+    logger.info(f"Command line arguments: {vars(args)}")
 
     input_file = args.input
     output_dir = args.output
@@ -195,21 +253,27 @@ def main():
     # Validate input
     try:
         validate_input_file(input_file)
+        logger.info(f"Input file validated: {input_file}")
     except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Input validation failed: {e}")
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     
     # Validate max size
     if max_size_mb > 25:
+        logger.warning(f"Max size {max_size_mb}MB exceeds OpenAI's 25MB limit")
         print("Warning: OpenAI's maximum file size is 25MB. Consider using --maxmb 25 or less.", file=sys.stderr)
     elif max_size_mb < 1:
+        logger.error(f"Invalid max size: {max_size_mb}MB")
         print("Error: Maximum chunk size must be at least 1MB", file=sys.stderr)
         sys.exit(1)
     
     # Create output directory
     try:
         os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Output directory ready: {output_dir}")
     except OSError as e:
+        logger.error(f"Failed to create output directory: {e}")
         print(f"Error creating output directory: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -217,12 +281,22 @@ def main():
         if args.verbose:
             print(f"Analyzing {input_file}...", file=sys.stderr)
         
+        logger.info("Starting audio analysis...")
         # Get audio information
         duration, bitrate, codec_name = get_audio_info(input_file)
+        logger.info(f"Audio info - Duration: {duration:.1f}s, Bitrate: {bitrate/1000:.0f}kbps, Codec: {codec_name}")
         
         # Calculate chunk duration based on output format bitrate
-        output_bitrate = {'high': 192, 'medium': 128, 'low': 96}[args.quality]
+        # M4A/AAC is ~30% more efficient than MP3, so adjust bitrate calculation
+        base_bitrates = {'high': 192, 'medium': 128, 'low': 96}
+        output_bitrate = base_bitrates[args.quality]
+        if args.format == 'm4a':
+            # M4A is more efficient, so effective bitrate is higher for same file size
+            output_bitrate = int(output_bitrate * 0.8)  # Use 80% of bitrate for same quality
+        output_bitrate
         chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_bitrate)
+        num_chunks = math.ceil(duration / chunk_duration)
+        logger.info(f"Calculated chunk duration: {chunk_duration:.2f}s, Expected chunks: {num_chunks}")
         
         if args.verbose:
             file_size_mb = os.path.getsize(input_file) / (1024 * 1024)
@@ -232,30 +306,63 @@ def main():
             print(f"Estimated chunk duration: {chunk_duration:.2f} seconds", file=sys.stderr)
         
         if chunk_duration < 10:
+            logger.warning(f"Short chunk duration: {chunk_duration:.2f}s")
             print("Warning: Chunk duration is very short. Consider using a lower quality setting.", file=sys.stderr)
         
         # Split the audio
-        created_files = split_audio(input_file, chunk_duration, output_dir, args.format, args.quality, args.verbose)
+        logger.info(f"Starting audio split - Format: {args.format}, Quality: {args.quality}")
+        created_files = split_audio(input_file, chunk_duration, output_dir, args.format, args.quality, args.verbose, logger)
         
         # Print completion message (maintaining original format)
         print("✅ Done.")
         
-        # Additional info to stderr if verbose
-        if args.verbose and created_files:
-            print(f"\nSuccessfully created {len(created_files)} chunks", file=sys.stderr)
+        # Log summary
+        if created_files:
+            logger.info(f"Successfully created {len(created_files)} chunks")
             
-            # Check if any chunks are oversized
+            # Create summary for log
+            summary = {
+                'status': 'success',
+                'input_file': input_file,
+                'output_dir': output_dir,
+                'chunks_created': len(created_files),
+                'output_format': args.format,
+                'quality': args.quality,
+                'max_size_mb': max_size_mb,
+                'files': []
+            }
+            
+            # Check chunk sizes and log
+            oversized_count = 0
             for f in created_files:
                 size_mb = os.path.getsize(f) / (1024 * 1024)
+                summary['files'].append({
+                    'filename': os.path.basename(f),
+                    'size_mb': round(size_mb, 2)
+                })
                 if size_mb > 25:
-                    print(f"Warning: {os.path.basename(f)} is {size_mb:.1f} MB (exceeds OpenAI limit)", file=sys.stderr)
+                    oversized_count += 1
+                    logger.warning(f"Oversized chunk: {os.path.basename(f)} is {size_mb:.1f} MB")
+                    if args.verbose:
+                        print(f"Warning: {os.path.basename(f)} is {size_mb:.1f} MB (exceeds OpenAI limit)", file=sys.stderr)
+            
+            if oversized_count > 0:
+                summary['warnings'] = f"{oversized_count} chunks exceed 25MB limit"
+            
+            logger.info(f"Processing summary: {json.dumps(summary, indent=2)}")
+        else:
+            logger.error("No chunks were created")
             
     except Exception as e:
+        logger.error(f"Script failed with error: {e}", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         if args.verbose:
             import traceback
             traceback.print_exc(file=sys.stderr)
         sys.exit(1)
+    finally:
+        logger.info("Audio splitter script finished")
+        logger.info("="*60)
 
 if __name__ == '__main__':
     main()
