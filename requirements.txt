@@ -1,0 +1,12 @@
+# Audio file splitter requirements
+# Install with: pip install -r requirements.txt
+
+# ffmpeg-python: Python bindings for FFmpeg
+# Used for audio file analysis and metadata extraction
+ffmpeg-python==0.2.0
+
+# Note: This script also requires FFmpeg to be installed on your system
+# Install FFmpeg:
+# - Ubuntu/Debian: sudo apt-get install ffmpeg
+# - macOS: brew install ffmpeg
+# - Windows: Download from https://ffmpeg.org/download.html
