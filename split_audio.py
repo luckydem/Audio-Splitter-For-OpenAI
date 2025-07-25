@@ -44,16 +44,86 @@ def get_audio_info(filepath):
     codec_name = audio_stream['codec_name']
     return duration, bitrate, codec_name
 
-def calculate_chunk_duration(bitrate_bps, max_mb, output_bitrate_kbps=192):
+def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_kbps=192):
     """
-    Calculate max chunk duration in seconds given a max file size in MB and bitrate
-    Accounts for potential bitrate changes during conversion
+    Calculate max chunk duration in seconds given a max file size in MB and output format
+    Accounts for different format characteristics and compression ratios
     """
-    # Use output bitrate if converting to MP3
-    effective_bitrate = output_bitrate_kbps * 1000  # Convert to bps
+    # Format-specific bitrate calculations
+    if output_format == 'wav':
+        # WAV is uncompressed: 16-bit * 2 channels * sample_rate
+        # Standard CD quality: 16 * 2 * 44100 = 1,411,200 bps
+        effective_bitrate = 1411200  # 44.1kHz 16-bit stereo
+    elif output_format == 'flac':
+        # FLAC compression ratio varies, but typically 50-70% of original
+        # Use conservative estimate of 60% compression
+        effective_bitrate = 1411200 * 0.6  # ~847kbps
+    else:
+        # For compressed formats (MP3, M4A, OGG, WebM, MP4)
+        effective_bitrate = output_bitrate_kbps * 1000  # Convert to bps
+    
     max_bits = max_mb * 8 * 1024 * 1024  # MB to bits
-    # Add 10% safety margin to avoid oversized chunks
-    return (max_bits / effective_bitrate) * 0.9
+    
+    # Add 20% safety margin to avoid oversized chunks (especially important for variable bitrate)
+    safety_margin = 0.8
+    max_duration = (max_bits / effective_bitrate) * safety_margin
+    
+    # Minimum chunk duration of 10 seconds to avoid too many tiny files
+    return max(max_duration, 10.0)
+
+def get_optimal_output_format(input_filepath, user_format=None):
+    """
+    Determine the optimal output format based on input format and OpenAI compatibility.
+    Prioritizes performance on Raspberry Pi while maintaining quality.
+    """
+    # OpenAI Whisper API supported formats (2024)
+    OPENAI_SUPPORTED = {'.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm', '.flac', '.ogg'}
+    
+    # Performance ranking for Pi 4 (fastest to slowest)
+    PERFORMANCE_RANKING = {
+        'wav': 1,    # Just container change, no encoding
+        'mp3': 2,    # Hardware-optimized, widely supported
+        'flac': 3,   # Lossless but larger files
+        'ogg': 4,    # Good compression, moderate CPU
+        'm4a': 5,    # AAC encoding is CPU intensive on Pi
+        'webm': 6,   # Complex encoding
+        'mp4': 7,    # Video container overhead
+    }
+    
+    # Format compatibility matrix: input -> best OpenAI output
+    FORMAT_MAPPING = {
+        # Already OpenAI compatible - keep same format for speed
+        '.mp3': 'mp3',
+        '.wav': 'wav', 
+        '.m4a': 'm4a',
+        '.flac': 'flac',
+        '.ogg': 'ogg',
+        '.webm': 'webm',
+        '.mp4': 'mp4',
+        '.mpeg': 'mp3',  # Convert to MP3 (similar)
+        '.mpga': 'mp3',  # Convert to MP3 (similar)
+        
+        # Not OpenAI compatible - convert to best match
+        '.wma': 'wav',   # WMA->WAV fastest on Pi, lossless quality
+        '.aac': 'm4a',   # AAC is M4A codec, just container change
+        '.opus': 'ogg',  # Opus->OGG similar codec family
+        '.mkv': 'wav',   # Extract audio to WAV (fastest)
+        '.avi': 'wav',   # Extract audio to WAV (fastest)
+        '.mov': 'mp4',   # MOV->MP4 similar containers
+    }
+    
+    input_ext = Path(input_filepath).suffix.lower()
+    
+    # If user specified format, validate it's OpenAI compatible
+    if user_format:
+        if f'.{user_format}' not in OPENAI_SUPPORTED:
+            raise ValueError(f"Format '{user_format}' is not supported by OpenAI Whisper API")
+        return user_format
+    
+    # Auto-select optimal format
+    optimal_format = FORMAT_MAPPING.get(input_ext, 'wav')  # Default to WAV if unknown
+    
+    return optimal_format
 
 def validate_input_file(filepath):
     """
@@ -61,7 +131,7 @@ def validate_input_file(filepath):
     """
     SUPPORTED_EXTENSIONS = {
         '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.opus', 
-        '.wma', '.mp4', '.webm', '.mkv', '.avi', '.mov'
+        '.wma', '.mp4', '.webm', '.mkv', '.avi', '.mov', '.mpeg', '.mpga'
     }
     
     path = Path(filepath)
@@ -77,7 +147,7 @@ def validate_input_file(filepath):
     
     return True
 
-def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', quality='medium', verbose=False, logger=None):
+def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', quality='medium', verbose=False, logger=None, stream_mode=False):
     """
     Use ffmpeg to split the audio file into chunks of chunk_duration seconds
     
@@ -88,6 +158,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
         output_format: Output format (default: m4a for OpenAI compatibility)
         quality: Audio quality setting ('high', 'medium', 'low')
         verbose: Show detailed output
+        stream_mode: Emit JSON for each chunk immediately (for n8n integration)
     """
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
@@ -115,8 +186,21 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
         start_time = i * chunk_duration
         output_path = os.path.join(output_dir, f'chunk_{i+1:03d}.{output_format}')
         
-        # IMPORTANT: Maintain original stdout format for n8n compatibility
-        print(f"Exporting {output_path}")
+        # Stream mode: emit JSON immediately for n8n
+        if stream_mode:
+            chunk_info = {
+                "chunk_number": i + 1,
+                "total_chunks": num_chunks,
+                "output_path": output_path,
+                "start_time": start_time,
+                "duration": chunk_duration,
+                "status": "processing"
+            }
+            print(json.dumps(chunk_info), flush=True)
+        else:
+            # IMPORTANT: Maintain original stdout format for n8n compatibility
+            print(f"Exporting {output_path}")
+        
         logger.info(f"Processing chunk {i+1}/{num_chunks}: {os.path.basename(output_path)}")
         
         try:
@@ -162,6 +246,61 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-ac', '2',
                     output_path
                 ]
+            elif output_format == 'flac':
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', input_file,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration),
+                    '-vn',
+                    '-c:a', 'flac',
+                    '-ar', settings['sample_rate'],
+                    '-ac', '2',
+                    output_path
+                ]
+            elif output_format == 'ogg':
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', input_file,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration),
+                    '-vn',
+                    '-c:a', 'libvorbis',
+                    '-b:a', settings['bitrate'],
+                    '-ar', settings['sample_rate'],
+                    '-ac', '2',
+                    output_path
+                ]
+            elif output_format == 'webm':
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', input_file,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration),
+                    '-vn',
+                    '-c:a', 'libopus',
+                    '-b:a', settings['bitrate'],
+                    '-ar', '48000',  # Opus works best at 48kHz
+                    '-ac', '2',
+                    output_path
+                ]
+            elif output_format == 'mp4':
+                cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-i', input_file,
+                    '-ss', str(start_time),
+                    '-t', str(chunk_duration),
+                    '-vn',
+                    '-c:a', 'aac',
+                    '-b:a', settings['bitrate'],
+                    '-ar', settings['sample_rate'],
+                    '-ac', '2',
+                    output_path
+                ]
             
             # Run ffmpeg with error capture
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -175,6 +314,17 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                 file_size = os.path.getsize(output_path) / (1024 * 1024)
                 logger.info(f"Chunk {i+1} created successfully: {os.path.basename(output_path)} ({file_size:.1f} MB)")
                 successfully_created.append(output_path)
+                
+                # Stream mode: emit success status immediately
+                if stream_mode:
+                    chunk_info = {
+                        "chunk_number": i + 1,
+                        "total_chunks": num_chunks,
+                        "output_path": output_path,
+                        "file_size_mb": round(file_size, 2),
+                        "status": "completed"
+                    }
+                    print(json.dumps(chunk_info), flush=True)
                 
         except Exception as e:
             logger.error(f"Exception while creating chunk {i+1}: {str(e)}")
@@ -232,12 +382,17 @@ def main():
     parser.add_argument('--output', required=True, help='Output directory')
     parser.add_argument('--maxmb', type=int, default=20, 
                        help='Max size in MB per chunk (default: 20, OpenAI limit: 25)')
-    parser.add_argument('--format', default='m4a', choices=['mp3', 'wav', 'm4a'],
-                       help='Output format (default: m4a for best OpenAI compatibility and compression)')
+    parser.add_argument('--format', default='auto', 
+                       choices=['auto', 'mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm', 'mp4'],
+                       help='Output format (default: auto - selects optimal format based on input)')
     parser.add_argument('--quality', default='medium', choices=['high', 'medium', 'low'],
                        help='Audio quality (default: medium for good quality/size balance)')
     parser.add_argument('--verbose', action='store_true', help='Show detailed processing information')
     parser.add_argument('--no-log', action='store_true', help='Disable logging to file')
+    parser.add_argument('--stream', action='store_true', 
+                       help='Stream output mode: emit each chunk immediately as JSON for n8n processing')
+    parser.add_argument('--output-json', action='store_true',
+                       help='Output results as JSON format for n8n integration')
     args = parser.parse_args()
     
     # Log script start
@@ -249,6 +404,14 @@ def main():
     input_file = args.input
     output_dir = args.output
     max_size_mb = args.maxmb
+    
+    # Determine optimal output format
+    if args.format == 'auto':
+        output_format = get_optimal_output_format(input_file)
+        logger.info(f"Auto-selected output format: {output_format} (based on input: {Path(input_file).suffix})")
+    else:
+        output_format = get_optimal_output_format(input_file, args.format)
+        logger.info(f"User-specified output format: {output_format}")
     
     # Validate input
     try:
@@ -286,15 +449,11 @@ def main():
         duration, bitrate, codec_name = get_audio_info(input_file)
         logger.info(f"Audio info - Duration: {duration:.1f}s, Bitrate: {bitrate/1000:.0f}kbps, Codec: {codec_name}")
         
-        # Calculate chunk duration based on output format bitrate
-        # M4A/AAC is ~30% more efficient than MP3, so adjust bitrate calculation
+        # Calculate chunk duration based on output format
         base_bitrates = {'high': 192, 'medium': 128, 'low': 96}
         output_bitrate = base_bitrates[args.quality]
-        if args.format == 'm4a':
-            # M4A is more efficient, so effective bitrate is higher for same file size
-            output_bitrate = int(output_bitrate * 0.8)  # Use 80% of bitrate for same quality
-        output_bitrate
-        chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_bitrate)
+        
+        chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_format, output_bitrate)
         num_chunks = math.ceil(duration / chunk_duration)
         logger.info(f"Calculated chunk duration: {chunk_duration:.2f}s, Expected chunks: {num_chunks}")
         
@@ -302,19 +461,52 @@ def main():
             file_size_mb = os.path.getsize(input_file) / (1024 * 1024)
             print(f"File size: {file_size_mb:.1f} MB", file=sys.stderr)
             print(f"Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)", file=sys.stderr)
-            print(f"Input codec: {codec_name}", file=sys.stderr)
-            print(f"Estimated chunk duration: {chunk_duration:.2f} seconds", file=sys.stderr)
+            print(f"Input codec: {codec_name} -> Output format: {output_format.upper()}", file=sys.stderr)
+            print(f"Target max chunk size: {max_size_mb} MB", file=sys.stderr)
+            print(f"Calculated chunk duration: {chunk_duration:.2f} seconds", file=sys.stderr)
+            print(f"Expected number of chunks: {num_chunks}", file=sys.stderr)
         
         if chunk_duration < 10:
             logger.warning(f"Short chunk duration: {chunk_duration:.2f}s")
             print("Warning: Chunk duration is very short. Consider using a lower quality setting.", file=sys.stderr)
         
         # Split the audio
-        logger.info(f"Starting audio split - Format: {args.format}, Quality: {args.quality}")
-        created_files = split_audio(input_file, chunk_duration, output_dir, args.format, args.quality, args.verbose, logger)
+        logger.info(f"Starting audio split - Format: {output_format}, Quality: {args.quality}, Stream: {args.stream}")
+        created_files = split_audio(input_file, chunk_duration, output_dir, output_format, args.quality, args.verbose, logger, args.stream)
         
-        # Print completion message (maintaining original format)
-        print("✅ Done.")
+        # Handle different output modes
+        if args.stream:
+            # Stream mode: emit final summary as JSON
+            summary = {
+                "status": "completed",
+                "total_chunks": len(created_files),
+                "output_format": output_format,
+                "chunks": [os.path.basename(f) for f in created_files]
+            }
+            print(json.dumps(summary), flush=True)
+        elif args.output_json:
+            # JSON output mode: full summary
+            summary = {
+                "status": "success",
+                "input_file": input_file,
+                "output_dir": output_dir,
+                "chunks_created": len(created_files),
+                "output_format": output_format,
+                "quality": args.quality,
+                "max_size_mb": max_size_mb,
+                "files": []
+            }
+            for f in created_files:
+                size_mb = os.path.getsize(f) / (1024 * 1024)
+                summary['files'].append({
+                    'path': f,
+                    'filename': os.path.basename(f),
+                    'size_mb': round(size_mb, 2)
+                })
+            print(json.dumps(summary, indent=2))
+        else:
+            # Print completion message (maintaining original format)
+            print("✅ Done.")
         
         # Log summary
         if created_files:
@@ -326,7 +518,7 @@ def main():
                 'input_file': input_file,
                 'output_dir': output_dir,
                 'chunks_created': len(created_files),
-                'output_format': args.format,
+                'output_format': output_format,
                 'quality': args.quality,
                 'max_size_mb': max_size_mb,
                 'files': []
