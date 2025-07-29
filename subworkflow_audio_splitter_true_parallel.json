@@ -1,0 +1,87 @@
+{
+  "name": "Sub-Workflow: Split Audio (True Parallel)",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "file_path"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-680, -20],
+      "id": "trigger",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "command": "=/home/demian/.n8n/scripts/.venv/bin/python /home/demian/.n8n/scripts/split_audio.py --input \"/home/demian/.n8n/binaryData/{{ $json.file_path }}\" --output \"/tmp/\" --stream"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-360, -20],
+      "id": "splitter",
+      "name": "Execute Audio Splitter Script"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parser for TRUE parallel processing\nconst scriptOutput = $('Execute Audio Splitter Script').first().json;\n\nif (!scriptOutput.stdout) {\n  throw new Error('Audio splitter script produced no output');\n}\n\nconst lines = scriptOutput.stdout.trim().split('\\n').filter(line => line.trim());\nconst items = [];\n\nfor (const line of lines) {\n  try {\n    const data = JSON.parse(line);\n    \n    if (data.status === 'completed' && data.chunk_number) {\n      items.push({\n        json: {\n          filePath: data.output_path,\n          fileName: data.output_path.split('/').pop(),\n          chunkNumber: data.chunk_number,\n          fileSizeMB: data.file_size_mb,\n          status: 'completed',\n          originalFile: $('When Executed by Another Workflow').first().json.file_path\n        }\n      });\n    }\n  } catch (e) {\n    if (line.includes('Exporting ')) {\n      const path = line.replace('Exporting ', '').trim();\n      if (path) {\n        items.push({\n          json: {\n            filePath: path,\n            fileName: path.split('/').pop(),\n            chunkNumber: parseInt(path.match(/chunk_(\\d+)/)?.[1] || '0'),\n            status: 'completed',\n            originalFile: $('When Executed by Another Workflow').first().json.file_path\n          }\n        });\n      }\n    }\n  }\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, -20],
+      "id": "parser",
+      "name": "Parse Chunks (Individual Items)"
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $vars.transcribe_single_chunk_workflow_id }}",
+        "mode": "each",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "audio_file_path": "={{ $json.filePath }}",
+            "chunk_number": "={{ $json.chunkNumber }}",
+            "original_file": "={{ $json.originalFile }}"
+          }
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [80, -20],
+      "id": "transcribe",
+      "name": "Transcribe Each Chunk"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all transcription results\nconst chunks = $input.all();\n\n// Sort by chunk number\nchunks.sort((a, b) => a.json.chunk_number - b.json.chunk_number);\n\n// Merge text\nconst mergedText = chunks\n  .map(chunk => chunk.json.transcription_text || '')\n  .join(' ');\n\nconst totalDuration = chunks\n  .reduce((sum, chunk) => sum + (chunk.json.duration || 0), 0);\n\nreturn [{\n  json: {\n    text: mergedText,\n    duration: totalDuration,\n    chunks_processed: chunks.length,\n    original_file: chunks[0]?.json.original_file || 'unknown'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, -20],
+      "id": "aggregate",
+      "name": "Merge All Transcriptions"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [[{"node": "Execute Audio Splitter Script", "type": "main", "index": 0}]]
+    },
+    "Execute Audio Splitter Script": {
+      "main": [[{"node": "Parse Chunks (Individual Items)", "type": "main", "index": 0}]]
+    },
+    "Parse Chunks (Individual Items)": {
+      "main": [[{"node": "Transcribe Each Chunk", "type": "main", "index": 0}]]
+    },
+    "Transcribe Each Chunk": {
+      "main": [[{"node": "Merge All Transcriptions", "type": "main", "index": 0}]]
+    }
+  }
+}
