@@ -72,7 +72,7 @@ def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_
     # Minimum chunk duration of 10 seconds to avoid too many tiny files
     return max(max_duration, 10.0)
 
-def get_optimal_output_format(input_filepath, user_format=None):
+def get_optimal_output_format(input_filepath, user_format=None, detected_codec=None):
     """
     Determine the optimal output format based on input format and OpenAI compatibility.
     Prioritizes performance on Raspberry Pi while maintaining quality.
@@ -113,6 +113,18 @@ def get_optimal_output_format(input_filepath, user_format=None):
         '.mov': 'mp4',   # MOV->MP4 similar containers
     }
     
+    # Codec to format mapping for files without extensions
+    CODEC_MAPPING = {
+        'wmav1': 'ogg',   # WMA -> OGG
+        'wmav2': 'ogg',   # WMA -> OGG
+        'mp3': 'mp3',
+        'aac': 'm4a',
+        'vorbis': 'ogg',
+        'opus': 'ogg',
+        'flac': 'flac',
+        'pcm_s16le': 'wav',
+    }
+    
     input_ext = Path(input_filepath).suffix.lower()
     
     # If user specified format, validate it's OpenAI compatible
@@ -122,7 +134,12 @@ def get_optimal_output_format(input_filepath, user_format=None):
         return user_format
     
     # Auto-select optimal format
-    optimal_format = FORMAT_MAPPING.get(input_ext, 'wav')  # Default to WAV if unknown
+    if input_ext:
+        optimal_format = FORMAT_MAPPING.get(input_ext, 'mp3')
+    elif detected_codec:
+        optimal_format = CODEC_MAPPING.get(detected_codec.lower(), 'mp3')
+    else:
+        optimal_format = 'mp3'  # Safe default
     
     return optimal_format
 
@@ -406,15 +423,7 @@ def main():
     output_dir = args.output
     max_size_mb = args.maxmb
     
-    # Determine optimal output format
-    if args.format == 'auto':
-        output_format = get_optimal_output_format(input_file)
-        logger.info(f"Auto-selected output format: {output_format} (based on input: {Path(input_file).suffix})")
-    else:
-        output_format = get_optimal_output_format(input_file, args.format)
-        logger.info(f"User-specified output format: {output_format}")
-    
-    # Validate input
+    # Validate input and get audio info
     try:
         validate_input_file(input_file)
         logger.info(f"Input file validated: {input_file}")
@@ -422,6 +431,24 @@ def main():
         logger.error(f"Input validation failed: {e}")
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    
+    # Get audio information early for format detection
+    try:
+        logger.info("Starting audio analysis...")
+        duration, bitrate, codec_name = get_audio_info(input_file)
+        logger.info(f"Audio info - Duration: {duration:.1f}s, Bitrate: {bitrate/1000:.0f}kbps, Codec: {codec_name}")
+    except Exception as e:
+        logger.error(f"Failed to analyze audio file: {e}")
+        print(f"Error analyzing audio file: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Determine optimal output format using codec info
+    if args.format == 'auto':
+        output_format = get_optimal_output_format(input_file, detected_codec=codec_name)
+        logger.info(f"Auto-selected output format: {output_format} (based on input: {Path(input_file).suffix or 'codec: ' + codec_name})")
+    else:
+        output_format = get_optimal_output_format(input_file, args.format)
+        logger.info(f"User-specified output format: {output_format}")
     
     # Validate max size
     if max_size_mb > 25:
@@ -444,11 +471,6 @@ def main():
     try:
         if args.verbose:
             print(f"Analyzing {input_file}...", file=sys.stderr)
-        
-        logger.info("Starting audio analysis...")
-        # Get audio information
-        duration, bitrate, codec_name = get_audio_info(input_file)
-        logger.info(f"Audio info - Duration: {duration:.1f}s, Bitrate: {bitrate/1000:.0f}kbps, Codec: {codec_name}")
         
         # Calculate chunk duration based on output format
         base_bitrates = {'high': 192, 'medium': 128, 'low': 96}
