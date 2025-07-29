@@ -117,6 +117,137 @@ python split_audio.py --input audio.wma --output chunks/ --no-log
 3. **FFmpeg not found**: Ensure FFmpeg is installed and in your system PATH
 4. **Check the logs**: Look in the `logs/` directory for detailed error information
 
+## Serverless Deployment (Google Cloud Run)
+
+Deploy the audio splitter as a serverless API on Google Cloud Run for scalable, on-demand processing.
+
+### Features
+
+- **RESTful API** with FastAPI
+- **Google Cloud Storage** integration for file storage
+- **Signed URLs** for secure file downloads
+- **Webhook notifications** for async processing
+- **Auto-scaling** with Cloud Run
+
+### Quick Deploy
+
+1. **Prerequisites**:
+   ```bash
+   # Install Google Cloud SDK
+   curl https://sdk.cloud.google.com | bash
+   
+   # Authenticate
+   gcloud auth login
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+2. **Update deployment script**:
+   ```bash
+   # Edit deploy.sh and set your project ID
+   sed -i 's/your-project-id/YOUR_PROJECT_ID/g' deploy.sh
+   ```
+
+3. **Deploy to Cloud Run**:
+   ```bash
+   ./deploy.sh
+   ```
+
+### API Endpoints
+
+#### Upload and Split Audio
+```bash
+curl -X POST \
+  -F "file=@audio.mp3" \
+  -F "max_size_mb=20" \
+  -F "output_format=m4a" \
+  https://your-service.run.app/split
+```
+
+**Response**:
+```json
+{
+  "job_id": "20250729115940_audio.mp3",
+  "status": "completed",
+  "total_chunks": 5,
+  "chunks": [
+    {
+      "chunk_number": 1,
+      "filename": "chunk_001.m4a",
+      "size_mb": 19.8,
+      "download_url": "https://storage.googleapis.com/..."
+    }
+  ]
+}
+```
+
+#### Process File from GCS
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "gcs_path": "gs://my-bucket/audio.mp3",
+    "max_size_mb": 20,
+    "webhook_url": "https://myapp.com/webhook"
+  }' \
+  https://your-service.run.app/split-from-gcs
+```
+
+### n8n Integration
+
+Replace your Execute Command node with an HTTP Request node:
+
+1. **Method**: POST
+2. **URL**: `https://your-service.run.app/split`
+3. **Send Binary Data**: Enable
+4. **Binary Property**: Select your audio file
+5. **Options** > **Query Parameters**:
+   - `max_size_mb`: 20
+   - `output_format`: m4a
+
+### Architecture Options
+
+1. **Basic API** (`audio_splitter_api.py`):
+   - Simple file upload/download
+   - Temporary local storage
+   - Good for testing
+
+2. **GCS-Integrated API** (`audio_splitter_gcs.py`):
+   - Direct Google Cloud Storage integration
+   - Signed URLs for secure access
+   - Production-ready with webhooks
+
+### Configuration
+
+Environment variables for Cloud Run:
+- `GCS_BUCKET_NAME`: Storage bucket for chunks
+- `SIGNED_URL_EXPIRY_HOURS`: URL expiration time (default: 24)
+- `PORT`: Server port (default: 8080)
+
+### Performance
+
+- **Memory**: 2GB (configurable in cloudbuild.yaml)
+- **CPU**: 2 vCPUs
+- **Timeout**: 10 minutes
+- **Concurrency**: 10 requests per instance
+- **Auto-scaling**: 0-100 instances
+
+### Monitoring
+
+View logs and metrics:
+```bash
+# View logs
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=audio-splitter" --limit 50
+
+# View metrics in Cloud Console
+gcloud run services describe audio-splitter --region=us-central1
+```
+
+### Cost Optimization
+
+- Files are automatically deleted after 7 days
+- Cloud Run scales to zero when not in use
+- Use `--max-instances` to control costs
+
 ## License
 
 This project is licensed under the MIT License.

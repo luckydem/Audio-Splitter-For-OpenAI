@@ -1,0 +1,44 @@
+# Cloud Build configuration for deploying to Cloud Run
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/audio-splitter:$COMMIT_SHA', '.']
+  
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/audio-splitter:$COMMIT_SHA']
+  
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'audio-splitter'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/audio-splitter:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '600'
+      - '--concurrency'
+      - '10'
+      - '--max-instances'
+      - '100'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'GCS_BUCKET_NAME=audio-splitter-chunks,SIGNED_URL_EXPIRY_HOURS=24'
+
+# Build timeout
+timeout: '1200s'
+
+# Substitutions (optional)
+substitutions:
+  _SERVICE_NAME: audio-splitter
+  _REGION: us-central1
