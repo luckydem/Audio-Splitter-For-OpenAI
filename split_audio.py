@@ -104,11 +104,11 @@ def get_optimal_output_format(input_filepath, user_format=None):
         '.mpga': 'mp3',  # Convert to MP3 (similar)
         
         # Not OpenAI compatible - convert to best match
-        '.wma': 'wav',   # WMA->WAV fastest on Pi, lossless quality
+        '.wma': 'mp3',   # WMA->MP3 for good compression and compatibility
         '.aac': 'm4a',   # AAC is M4A codec, just container change
         '.opus': 'ogg',  # Opus->OGG similar codec family
-        '.mkv': 'wav',   # Extract audio to WAV (fastest)
-        '.avi': 'wav',   # Extract audio to WAV (fastest)
+        '.mkv': 'mp3',   # Extract audio to MP3 (compressed)
+        '.avi': 'mp3',   # Extract audio to MP3 (compressed)
         '.mov': 'mp4',   # MOV->MP4 similar containers
     }
     
