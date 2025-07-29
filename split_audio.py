@@ -472,8 +472,8 @@ def main():
         if args.verbose:
             print(f"Analyzing {input_file}...", file=sys.stderr)
         
-        # Calculate chunk duration based on output format
-        base_bitrates = {'high': 192, 'medium': 128, 'low': 96}
+        # Calculate chunk duration based on output format - use same bitrates as encoding
+        base_bitrates = {'high': 128, 'medium': 96, 'low': 64}  # Match the quality_settings in split_audio()
         output_bitrate = base_bitrates[args.quality]
         
         chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_format, output_bitrate)
