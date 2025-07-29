@@ -104,7 +104,7 @@ def get_optimal_output_format(input_filepath, user_format=None):
         '.mpga': 'mp3',  # Convert to MP3 (similar)
         
         # Not OpenAI compatible - convert to best match
-        '.wma': 'mp3',   # WMA->MP3 for good compression and compatibility
+        '.wma': 'ogg',   # WMA->OGG (Opus) for best compression/quality ratio
         '.aac': 'm4a',   # AAC is M4A codec, just container change
         '.opus': 'ogg',  # Opus->OGG similar codec family
         '.mkv': 'mp3',   # Extract audio to MP3 (compressed)
@@ -165,9 +165,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     
     # Quality presets (optimized for speech transcription)
     quality_settings = {
-        'high': {'bitrate': '192k', 'sample_rate': '44100'},
-        'medium': {'bitrate': '128k', 'sample_rate': '44100'},
-        'low': {'bitrate': '96k', 'sample_rate': '22050'}
+        'high': {'bitrate': '128k', 'sample_rate': '24000'},
+        'medium': {'bitrate': '96k', 'sample_rate': '16000'},
+        'low': {'bitrate': '64k', 'sample_rate': '16000'}
     }
     
     settings = quality_settings.get(quality, quality_settings['high'])
