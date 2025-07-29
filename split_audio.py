@@ -64,8 +64,9 @@ def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_
     
     max_bits = max_mb * 8 * 1024 * 1024  # MB to bits
     
-    # Add 20% safety margin to avoid oversized chunks (especially important for variable bitrate)
-    safety_margin = 0.8
+    # Add safety margin to avoid oversized chunks (especially important for variable bitrate)
+    # Use 5% margin for compressed formats, 10% for uncompressed
+    safety_margin = 0.9 if output_format in ['wav', 'flac'] else 0.95
     max_duration = (max_bits / effective_bitrate) * safety_margin
     
     # Minimum chunk duration of 10 seconds to avoid too many tiny files
@@ -380,8 +381,8 @@ def main():
     )
     parser.add_argument('--input', required=True, help='Path to input audio file')
     parser.add_argument('--output', required=True, help='Output directory')
-    parser.add_argument('--maxmb', type=int, default=20, 
-                       help='Max size in MB per chunk (default: 20, OpenAI limit: 25)')
+    parser.add_argument('--maxmb', type=int, default=24, 
+                       help='Max size in MB per chunk (default: 24, OpenAI limit: 25)')
     parser.add_argument('--format', default='auto', 
                        choices=['auto', 'mp3', 'wav', 'm4a', 'flac', 'ogg', 'webm', 'mp4'],
                        help='Output format (default: auto - selects optimal format based on input)')
