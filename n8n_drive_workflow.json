@@ -1,0 +1,238 @@
+{
+  "name": "Google Drive Audio Processing Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "drive-trigger",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://audio-splitter-xxx.run.app/process-drive-file",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"drive_file_id\": \"{{ $json.id }}\",\n  \"max_size_mb\": 20,\n  \"output_format\": \"m4a\",\n  \"quality\": \"medium\",\n  \"webhook_url\": \"{{ $execution.resumeUrl }}\",\n  \"skip_transcription\": false\n}",
+        "options": {}
+      },
+      "id": "process-audio",
+      "name": "Process Audio File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "webhookSuffix": "audio-processed"
+        }
+      },
+      "id": "wait-webhook",
+      "name": "Wait for Processing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [650, 300],
+      "webhookId": "audio-processed"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://audio-splitter-xxx.run.app/transcribe-and-compile",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chunks\": {{ JSON.stringify($json.chunks) }},\n  \"openai_api_key\": \"{{ $credentials.openAiApi.apiKey }}\",\n  \"compile_minutes\": true,\n  \"webhook_url\": \"{{ $execution.resumeUrl }}\"\n}",
+        "options": {}
+      },
+      "id": "transcribe-compile",
+      "name": "Transcribe & Compile Minutes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "webhookSuffix": "minutes-ready"
+        }
+      },
+      "id": "wait-minutes",
+      "name": "Wait for Minutes",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1050, 300],
+      "webhookId": "minutes-ready"
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $('Google Drive Trigger').item.json.name.replace(/\\.[^/.]+$/, '') }}_minutes.txt",
+        "parents": {
+          "__rl": true,
+          "value": "YOUR_OUTPUT_FOLDER_ID",
+          "mode": "id"
+        },
+        "resolveData": true,
+        "options": {}
+      },
+      "id": "upload-minutes",
+      "name": "Upload Minutes to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1250, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Google Drive Trigger').item.json.id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_PROCESSED_FOLDER_ID",
+          "mode": "id"
+        }
+      },
+      "id": "move-processed",
+      "name": "Move to Processed Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1450, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Google Drive Audio Processing Pipeline\n\n1. **Monitors** a Google Drive folder for new audio files\n2. **Sends** file directly to Cloud Run API (no download!)\n3. **Splits** audio into chunks optimized for OpenAI\n4. **Transcribes** all chunks in parallel\n5. **Compiles** minutes from transcriptions\n6. **Uploads** minutes back to Google Drive\n7. **Moves** original file to processed folder\n\n### Benefits:\n- No local downloads needed\n- Processes 60min audio in ~2 minutes\n- Fully serverless and scalable\n- Direct Drive → API → Drive pipeline",
+        "height": 400,
+        "width": 600,
+        "color": 4
+      },
+      "id": "note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [200, 50]
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Process Audio File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Audio File": {
+      "main": [
+        [
+          {
+            "node": "Wait for Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Processing": {
+      "main": [
+        [
+          {
+            "node": "Transcribe & Compile Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe & Compile Minutes": {
+      "main": [
+        [
+          {
+            "node": "Wait for Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Minutes": {
+      "main": [
+        [
+          {
+            "node": "Upload Minutes to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Minutes to Drive": {
+      "main": [
+        [
+          {
+            "node": "Move to Processed Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
