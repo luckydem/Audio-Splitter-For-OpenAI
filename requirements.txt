@@ -1,8 +1,18 @@
-# Audio file splitter requirements
-# Install with: pip install -r requirements.txt
+# Legacy requirements file - for backward compatibility only
+# 
+# ⚠️  DEPRECATED: This file is kept for compatibility with existing scripts
+# 
+# For new installations, use:
+#   - requirements-production.txt: For Cloud Run deployment (minimal dependencies)
+#   - requirements-dev.txt: For local development and testing (includes all tools)
+# 
+# To set up development environment:
+#   ./setup-dev.sh
+#
+# To deploy to Cloud Run:
+#   ./deploy.sh (uses requirements-production.txt automatically)
 
-# ffmpeg-python: Python bindings for FFmpeg
-# Used for audio file analysis and metadata extraction
+# Core audio processing
 ffmpeg-python==0.2.0
 
 # Note: This script also requires FFmpeg to be installed on your system

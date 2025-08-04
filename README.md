@@ -248,6 +248,176 @@ gcloud run services describe audio-splitter --region=us-central1
 - Cloud Run scales to zero when not in use
 - Use `--max-instances` to control costs
 
+## Storage Configuration & Retention
+
+### Current Setup
+
+The service uses Google Cloud Storage bucket `audio-splitter-chunks-duhworks` with the following structure:
+
+```
+audio-splitter-chunks-duhworks/
+├── chunks/                    # Audio file chunks
+│   └── {job_id}/
+│       ├── chunk_001.m4a
+│       ├── chunk_002.m4a
+│       └── ...
+└── transcriptions/           # Transcription results
+    └── {job_id}/
+        └── full_transcript.txt
+```
+
+### Retention Policy
+
+**Default: 7 days** - All files (chunks and transcriptions) are automatically deleted after 7 days.
+
+### Changing Retention Without Downtime
+
+#### Method 1: Quick Update via gsutil (No rebuild required)
+
+```bash
+# View current lifecycle policy
+gsutil lifecycle get gs://audio-splitter-chunks-duhworks
+
+# Change to 30 days retention
+cat > lifecycle.json << EOF
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": {"type": "Delete"},
+        "condition": {"age": 30}
+      }
+    ]
+  }
+}
+EOF
+gsutil lifecycle set lifecycle.json gs://audio-splitter-chunks-duhworks
+rm lifecycle.json
+
+# Verify the change
+gsutil lifecycle get gs://audio-splitter-chunks-duhworks
+```
+
+#### Method 2: Different Retention for Chunks vs Transcriptions
+
+```bash
+# Keep chunks for 7 days, transcriptions for 90 days
+cat > lifecycle.json << EOF
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": {"type": "Delete"},
+        "condition": {
+          "age": 7,
+          "matchesPrefix": ["chunks/"]
+        }
+      },
+      {
+        "action": {"type": "Delete"},
+        "condition": {
+          "age": 90,
+          "matchesPrefix": ["transcriptions/"]
+        }
+      }
+    ]
+  }
+}
+EOF
+gsutil lifecycle set lifecycle.json gs://audio-splitter-chunks-duhworks
+rm lifecycle.json
+```
+
+#### Method 3: Archive to Cheaper Storage
+
+```bash
+# Move to Nearline storage after 30 days, delete after 365 days
+cat > lifecycle.json << EOF
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": {
+          "type": "SetStorageClass",
+          "storageClass": "NEARLINE"
+        },
+        "condition": {
+          "age": 30,
+          "matchesStorageClass": ["STANDARD"]
+        }
+      },
+      {
+        "action": {"type": "Delete"},
+        "condition": {"age": 365}
+      }
+    ]
+  }
+}
+EOF
+gsutil lifecycle set lifecycle.json gs://audio-splitter-chunks-duhworks
+rm lifecycle.json
+```
+
+### Other Runtime Configuration Changes (No Rebuild)
+
+#### 1. Change Signed URL Expiry Time
+
+```bash
+# Update Cloud Run environment variable (default: 24 hours)
+gcloud run services update audio-splitter-drive \
+  --update-env-vars SIGNED_URL_EXPIRY_HOURS=48 \
+  --region us-central1
+```
+
+#### 2. Update Bucket Name
+
+```bash
+# Create new bucket
+gsutil mb -p duhworks -c STANDARD -l us-central1 gs://new-bucket-name
+
+# Update Cloud Run service
+gcloud run services update audio-splitter-drive \
+  --update-env-vars GCS_BUCKET_NAME=new-bucket-name \
+  --region us-central1
+```
+
+#### 3. Change Chunk Storage Prefix
+
+```bash
+gcloud run services update audio-splitter-drive \
+  --update-env-vars GCS_CHUNK_PREFIX=audio-chunks/ \
+  --region us-central1
+```
+
+### Monitoring Storage Usage
+
+```bash
+# View bucket size
+gsutil du -sh gs://audio-splitter-chunks-duhworks
+
+# View detailed usage by folder
+gsutil du -h gs://audio-splitter-chunks-duhworks/*
+
+# List old files that will be deleted soon
+gsutil ls -L gs://audio-splitter-chunks-duhworks/** | grep -B1 "Creation time" | grep -B1 "$(date -d '6 days ago' '+%Y-%m-%d')"
+```
+
+### Best Practices
+
+1. **For Production**: Use 30-90 day retention for transcriptions, 7-14 days for audio chunks
+2. **For Compliance**: Implement separate buckets with different retention policies
+3. **For Cost Optimization**: 
+   - Use lifecycle rules to transition to cheaper storage classes
+   - Monitor bucket size regularly
+   - Consider shorter retention for large audio files
+
+### Storage Costs
+
+With current 7-day retention:
+- Standard storage: ~$0.020/GB/month
+- Effective cost with 7-day retention: ~$0.0047/GB
+- Example: Processing 100GB/month costs ~$0.47 in storage
+
 ## License
 
 This project is licensed under the MIT License.

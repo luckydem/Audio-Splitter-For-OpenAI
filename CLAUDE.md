@@ -97,3 +97,7 @@ The system requires FFmpeg installed:
 ```bash
 sudo apt-get install ffmpeg  # Debian/Ubuntu/Raspberry Pi OS
 ```
+
+## Logging and Monitoring
+
+- Use the cloud run log monitor agent every time I want to monitor logs

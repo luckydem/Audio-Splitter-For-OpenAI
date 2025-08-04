@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  audio-splitter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - GCS_BUCKET_NAME=audio-splitter-chunks-duhworks
+      - SIGNED_URL_EXPIRY_HOURS=24
+      - GOOGLE_SERVICE_ACCOUNT_KEY=service-account-key.json
+    volumes:
+      # Mount source code for live reloading during development
+      - ./audio_splitter_drive.py:/app/audio_splitter_drive.py
+      - ./split_audio.py:/app/split_audio.py
+      # Keep logs accessible
+      - ./logs:/app/logs
+    command: uvicorn audio_splitter_drive:app --host 0.0.0.0 --port 8080 --reload
+    # For debugging
+    stdin_open: true
+    tty: true

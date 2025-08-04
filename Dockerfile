@@ -10,19 +10,13 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install additional API dependencies
-RUN pip install --no-cache-dir \
-    fastapi==0.104.1 \
-    uvicorn[standard]==0.24.0 \
-    python-multipart==0.0.6 \
-    pydantic==2.5.0
+COPY requirements-production.txt .
+RUN pip install --no-cache-dir -r requirements-production.txt
 
 # Copy application code
 COPY split_audio.py .
-COPY audio_splitter_api.py .
+COPY audio_splitter_drive.py .
+COPY service-account-key.json .
 
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /tmp/audio_splits
@@ -39,4 +33,4 @@ USER appuser
 EXPOSE 8080
 
 # Start the application
-CMD ["uvicorn", "audio_splitter_api:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "audio_splitter_drive:app", "--host", "0.0.0.0", "--port", "8080"]

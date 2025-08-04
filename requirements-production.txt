@@ -1,0 +1,24 @@
+# Production requirements for Cloud Run deployment
+# This file contains ONLY the dependencies needed for running the service in production
+# Install with: pip install -r requirements-production.txt
+
+# Core audio processing
+ffmpeg-python==0.2.0
+
+# FastAPI and web server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+pydantic==2.5.0
+
+# Google Cloud integrations
+google-cloud-storage==2.10.0
+google-api-python-client==2.108.0
+google-auth==2.23.4
+
+# Async HTTP client for webhooks
+aiohttp==3.8.6
+
+# Note: System requirements
+# - FFmpeg must be installed (handled in Dockerfile)
+# - Python 3.10+ recommended

@@ -43,3 +43,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Sample Files
+sample-files/

@@ -2,10 +2,10 @@
 # Deploy script for Google Cloud Run
 
 # Set variables
-PROJECT_ID="your-project-id"
+PROJECT_ID="duhworks"
 REGION="us-central1"
 SERVICE_NAME="audio-splitter"
-BUCKET_NAME="audio-splitter-chunks"
+BUCKET_NAME="audio-splitter-chunks-${PROJECT_ID}"
 
 # Enable required APIs
 echo "Enabling required APIs..."
@@ -43,10 +43,17 @@ echo "Getting service URL..."
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')
 echo "Service deployed at: $SERVICE_URL"
 
+# Wait for Cloud Run deployment to complete before configuring service account
+echo "Waiting for deployment to complete..."
+sleep 10
+
 # Create service account for Cloud Run (optional - for authenticated access)
 echo "Creating service account..."
 gcloud iam service-accounts create audio-splitter-sa \
-  --display-name="Audio Splitter Service Account" || echo "Service account already exists"
+  --display-name="Audio Splitter Service Account" 2>/dev/null || echo "Service account already exists"
+
+# Wait for service account to be created
+sleep 5
 
 # Grant necessary permissions
 echo "Granting permissions..."
