@@ -40,7 +40,7 @@
         "url": "https://audio-splitter-453383149276.us-central1.run.app/process-drive-file",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"drive_file_id\": \"{{ $json.id }}\",\n  \"max_size_mb\": 25,\n  \"output_format\": \"m4a\",\n  \"quality\": \"medium\",\n  \"openai_api_key\": \"**REMOVED_API_KEY**",\n  \"webhook_url\": \"{{ $execution.resumeUrl }}\"\n}",
+        "jsonBody": "={\n  \"drive_file_id\": \"{{ $json.id }}\",\n  \"max_size_mb\": 25,\n  \"output_format\": \"m4a\",\n  \"quality\": \"medium\",\n  \"openai_api_key\": \"{{ $credentials.openai.api_key }}\",\n  \"webhook_url\": \"{{ $execution.resumeUrl }}\"\n}",
         "options": {}
       },
       "id": "072fdf42-55e5-4bfe-9407-d69512a0af9d",
