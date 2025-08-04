@@ -105,7 +105,7 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
         '.mpga': 'mp3',  # Convert to MP3 (similar)
         
         # Not OpenAI compatible - convert to best match
-        '.wma': 'wav',   # WMA->WAV 5-10x faster for Pi4, optimal for Whisper
+        '.wma': 'mp3',   # WMA->MP3 faster than M4A, much smaller than WAV
         '.aac': 'm4a',   # AAC is M4A codec, just container change
         '.opus': 'ogg',  # Opus->OGG similar codec family
         '.mkv': 'mp3',   # Extract audio to MP3 (compressed)
@@ -115,8 +115,8 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
     
     # Codec to format mapping for files without extensions
     CODEC_MAPPING = {
-        'wmav1': 'wav',   # WMA -> WAV (5-10x faster, optimal for Whisper)
-        'wmav2': 'wav',   # WMA -> WAV (5-10x faster, optimal for Whisper)
+        'wmav1': 'mp3',   # WMA -> MP3 (faster than M4A, smaller than WAV)
+        'wmav2': 'mp3',   # WMA -> MP3 (faster than M4A, smaller than WAV)
         'mp3': 'mp3',
         'aac': 'm4a',
         'vorbis': 'ogg',
