@@ -105,7 +105,7 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
         '.mpga': 'mp3',  # Convert to MP3 (similar)
         
         # Not OpenAI compatible - convert to best match
-        '.wma': 'ogg',   # WMA->OGG (Opus) for best compression/quality ratio
+        '.wma': 'wav',   # WMA->WAV 5-10x faster for Pi4, optimal for Whisper
         '.aac': 'm4a',   # AAC is M4A codec, just container change
         '.opus': 'ogg',  # Opus->OGG similar codec family
         '.mkv': 'mp3',   # Extract audio to MP3 (compressed)
@@ -115,8 +115,8 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
     
     # Codec to format mapping for files without extensions
     CODEC_MAPPING = {
-        'wmav1': 'ogg',   # WMA -> OGG
-        'wmav2': 'ogg',   # WMA -> OGG
+        'wmav1': 'wav',   # WMA -> WAV (5-10x faster, optimal for Whisper)
+        'wmav2': 'wav',   # WMA -> WAV (5-10x faster, optimal for Whisper)
         'mp3': 'mp3',
         'aac': 'm4a',
         'vorbis': 'ogg',
@@ -181,11 +181,12 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
     
-    # Quality presets (optimized for speech transcription)
+    # Quality presets (optimized for Whisper API speech transcription)
+    # Whisper internally resamples to 16kHz, so using 16kHz saves processing
     quality_settings = {
-        'high': {'bitrate': '128k', 'sample_rate': '24000'},
-        'medium': {'bitrate': '96k', 'sample_rate': '16000'},
-        'low': {'bitrate': '64k', 'sample_rate': '16000'}
+        'high': {'bitrate': '128k', 'sample_rate': '16000'},   # Best quality, still 16kHz
+        'medium': {'bitrate': '64k', 'sample_rate': '16000'},  # Optimal for speech
+        'low': {'bitrate': '32k', 'sample_rate': '16000'}      # Minimum recommended
     }
     
     settings = quality_settings.get(quality, quality_settings['high'])
@@ -473,7 +474,7 @@ def main():
             print(f"Analyzing {input_file}...", file=sys.stderr)
         
         # Calculate chunk duration based on output format - use same bitrates as encoding
-        base_bitrates = {'high': 128, 'medium': 96, 'low': 64}  # Match the quality_settings in split_audio()
+        base_bitrates = {'high': 128, 'medium': 64, 'low': 32}  # Match the quality_settings in split_audio()
         output_bitrate = base_bitrates[args.quality]
         
         chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_format, output_bitrate)

@@ -147,7 +147,7 @@ class DriveFileRequest(BaseModel):
     """Request to process a file from Google Drive"""
     drive_file_id: Optional[str] = Field(None, description="Google Drive file ID")
     drive_file_url: Optional[str] = Field(None, description="Alternative: Google Drive shareable link")
-    max_size_mb: Optional[float] = Field(default=20, description="Maximum chunk size in MB")
+    max_size_mb: Optional[float] = Field(default=15, description="Maximum chunk size in MB")
     output_format: Optional[str] = Field(default="auto", description="Output format: auto, mp3, wav, m4a")
     quality: Optional[str] = Field(default="medium", description="Output quality: low, medium, high")
     webhook_url: Optional[str] = Field(None, description="Webhook URL for completion notification")
@@ -566,9 +566,9 @@ async def process_file_async(
                     output_dir,
                     output_format,
                     request.quality,
-                    False,
-                    None,
-                    False
+                    False,  # verbose
+                    None,   # logger
+                    False   # stream_mode - for Cloud Run we process all at once
                 )
                 
                 # Process chunks with streaming transcription
