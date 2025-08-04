@@ -197,6 +197,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
         verbose: Show detailed output
         stream_mode: Emit JSON for each chunk immediately (for n8n integration)
     """
+    split_start_time = datetime.now()
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
     
@@ -221,6 +222,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     successfully_created = []
     
     for i in range(num_chunks):
+        chunk_start_timestamp = datetime.now()
         start_time = i * chunk_duration
         output_path = os.path.join(output_dir, f'chunk_{i+1:03d}.{output_format}')
         
@@ -239,7 +241,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
             # IMPORTANT: Maintain original stdout format for n8n compatibility
             print(f"Exporting {output_path}")
         
-        logger.info(f"Processing chunk {i+1}/{num_chunks}: {os.path.basename(output_path)}")
+        logger.info(f"[CHUNK {i+1}/{num_chunks}] Starting processing")
+        logger.info(f"[CHUNK {i+1}/{num_chunks}] Start time: {start_time:.2f}s, Duration: {chunk_duration:.2f}s")
+        logger.info(f"[CHUNK {i+1}/{num_chunks}] Output: {output_path}")
         
         try:
             # Build ffmpeg command based on output format
@@ -343,17 +347,25 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     output_path
                 ]
             
+            # Log the actual ffmpeg command being run
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] FFmpeg command: {' '.join(cmd)}")
+            
             # Run ffmpeg with error capture and proper stdin handling for containers
+            ffmpeg_start = datetime.now()
             result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
+            ffmpeg_duration = (datetime.now() - ffmpeg_start).total_seconds()
+            
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] FFmpeg completed in {ffmpeg_duration:.2f}s")
             
             if result.returncode != 0:
-                logger.error(f"FFmpeg failed for chunk {i+1}: {result.stderr[:500]}")
+                logger.error(f"[CHUNK {i+1}/{num_chunks}] FFmpeg FAILED: {result.stderr[:500]}")
                 print(f"Warning: Error processing chunk {i+1}", file=sys.stderr)
                 if verbose:
                     print(f"FFmpeg error: {result.stderr}", file=sys.stderr)
             else:
                 file_size = os.path.getsize(output_path) / (1024 * 1024)
-                logger.info(f"Chunk {i+1} created successfully: {os.path.basename(output_path)} ({file_size:.1f} MB)")
+                chunk_total_time = (datetime.now() - chunk_start_timestamp).total_seconds()
+                logger.info(f"[CHUNK {i+1}/{num_chunks}] SUCCESS: {file_size:.1f} MB in {chunk_total_time:.2f}s total ({ffmpeg_duration:.2f}s ffmpeg)")
                 successfully_created.append(output_path)
                 
                 # Stream mode: emit success status immediately
@@ -371,6 +383,11 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
             logger.error(f"Exception while creating chunk {i+1}: {str(e)}")
             print(f"Failed to create chunk {i+1}: {str(e)}", file=sys.stderr)
             continue
+    
+    # Log final summary
+    total_time = (datetime.now() - split_start_time).total_seconds()
+    logger.info(f"[SUMMARY] Completed {len(successfully_created)}/{num_chunks} chunks in {total_time:.2f}s")
+    logger.info(f"[SUMMARY] Average time per chunk: {total_time/max(len(successfully_created), 1):.2f}s")
     
     return successfully_created
 
