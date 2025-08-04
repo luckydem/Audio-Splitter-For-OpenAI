@@ -51,13 +51,13 @@ def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_
     """
     # Format-specific bitrate calculations
     if output_format == 'wav':
-        # WAV is uncompressed: 16-bit * 2 channels * sample_rate
-        # Standard CD quality: 16 * 2 * 44100 = 1,411,200 bps
-        effective_bitrate = 1411200  # 44.1kHz 16-bit stereo
+        # Speech-optimized WAV: 16-bit * 1 channel * 16kHz
+        # 16 * 1 * 16000 = 256,000 bps (vs 1,411,200 for CD quality)
+        effective_bitrate = 256000  # 16kHz 16-bit mono
     elif output_format == 'flac':
-        # FLAC compression ratio varies, but typically 50-70% of original
-        # Use conservative estimate of 60% compression
-        effective_bitrate = 1411200 * 0.6  # ~847kbps
+        # FLAC compression for speech WAV (16kHz mono)
+        # Typically achieves 50-60% compression on speech
+        effective_bitrate = 256000 * 0.5  # ~128kbps
     else:
         # For compressed formats (MP3, M4A, OGG, WebM, MP4)
         effective_bitrate = output_bitrate_kbps * 1000  # Convert to bps
@@ -71,6 +71,25 @@ def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_
     
     # Minimum chunk duration of 10 seconds to avoid too many tiny files
     return max(max_duration, 10.0)
+
+def estimate_chunk_size_mb(duration_seconds, output_format, quality='medium'):
+    """
+    Estimate the chunk size in MB for a given duration and format.
+    Used to predict if chunks will exceed the 25MB limit.
+    """
+    if output_format == 'wav':
+        # 16kHz, 16-bit, mono = 256kbps
+        size_bytes = (256000 / 8) * duration_seconds
+    elif output_format == 'flac':
+        # ~50% compression of speech WAV
+        size_bytes = (128000 / 8) * duration_seconds
+    else:
+        # Compressed formats - use quality bitrate
+        bitrates = {'high': 128000, 'medium': 64000, 'low': 32000}
+        bitrate = bitrates.get(quality, 64000)
+        size_bytes = (bitrate / 8) * duration_seconds
+    
+    return size_bytes / (1024 * 1024)  # Convert to MB
 
 def get_optimal_output_format(input_filepath, user_format=None, detected_codec=None):
     """
@@ -105,7 +124,7 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
         '.mpga': 'mp3',  # Convert to MP3 (similar)
         
         # Not OpenAI compatible - convert to best match
-        '.wma': 'mp3',   # WMA->MP3 faster than M4A, much smaller than WAV
+        '.wma': 'wav',   # WMA->WAV is 5-10x faster than MP3 (proven reliable)
         '.aac': 'm4a',   # AAC is M4A codec, just container change
         '.opus': 'ogg',  # Opus->OGG similar codec family
         '.mkv': 'mp3',   # Extract audio to MP3 (compressed)
@@ -115,8 +134,8 @@ def get_optimal_output_format(input_filepath, user_format=None, detected_codec=N
     
     # Codec to format mapping for files without extensions
     CODEC_MAPPING = {
-        'wmav1': 'mp3',   # WMA -> MP3 (faster than M4A, smaller than WAV)
-        'wmav2': 'mp3',   # WMA -> MP3 (faster than M4A, smaller than WAV)
+        'wmav1': 'wav',   # WMA -> WAV is 5-10x faster (proven reliable)
+        'wmav2': 'wav',   # WMA -> WAV is 5-10x faster (proven reliable)
         'mp3': 'mp3',
         'aac': 'm4a',
         'vorbis': 'ogg',
@@ -181,12 +200,12 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
     
-    # Quality presets (optimized for SPEED and Whisper API compatibility)
-    # Use higher bitrates with no resampling for faster processing
+    # Quality presets optimized for Whisper API speech transcription
+    # Whisper internally uses 16kHz, so we optimize for this
     quality_settings = {
-        'high': {'bitrate': '192k', 'sample_rate': None},      # Fast, good quality
-        'medium': {'bitrate': '160k', 'sample_rate': None},    # Balance speed/quality  
-        'low': {'bitrate': '128k', 'sample_rate': None}        # Still fast, lower quality
+        'high': {'bitrate': '128k', 'sample_rate': '16000'},   # High quality speech
+        'medium': {'bitrate': '64k', 'sample_rate': '16000'},  # Optimal for speech  
+        'low': {'bitrate': '32k', 'sample_rate': '16000'}      # Minimum for speech
     }
     
     settings = quality_settings.get(quality, quality_settings['high'])
@@ -233,16 +252,14 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-t', str(chunk_duration),
                     '-vn',  # No video
                     '-c:a', 'libmp3lame',  # MP3 codec
-                    '-preset', 'fast',     # Fast encoding preset
                     '-b:a', settings['bitrate'],  # Audio bitrate
-                    '-ac', '2',  # Stereo output
+                    '-ar', settings['sample_rate'],  # Sample rate
+                    '-ac', '1',  # Mono for speech
                     output_path
                 ]
-                # Only add sample rate if specified (avoid unnecessary resampling)
-                if settings['sample_rate']:
-                    cmd.insert(-1, '-ar')
-                    cmd.insert(-1, settings['sample_rate'])
             elif output_format == 'wav':
+                # Compressed WAV for speech: 16-bit, 16kHz, mono
+                # Reduces file size by ~20x compared to CD quality
                 cmd = [
                     'ffmpeg',
                     '-y',
@@ -250,9 +267,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-ss', str(start_time),
                     '-t', str(chunk_duration),
                     '-vn',
-                    '-c:a', 'pcm_s16le',
-                    '-ar', '44100',
-                    '-ac', '2',
+                    '-c:a', 'pcm_s16le',  # 16-bit PCM
+                    '-ar', '16000',       # 16kHz for speech (Whisper native)
+                    '-ac', '1',           # Mono for speech transcription
                     output_path
                 ]
             elif output_format == 'm4a':
@@ -278,8 +295,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-t', str(chunk_duration),
                     '-vn',
                     '-c:a', 'flac',
-                    '-ar', settings['sample_rate'],
-                    '-ac', '2',
+                    '-ar', '16000',      # 16kHz for speech
+                    '-ac', '1',          # Mono for speech
+                    '-compression_level', '5',  # Default compression
                     output_path
                 ]
             elif output_format == 'ogg':
@@ -325,8 +343,8 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     output_path
                 ]
             
-            # Run ffmpeg with error capture
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # Run ffmpeg with error capture and proper stdin handling for containers
+            result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
             
             if result.returncode != 0:
                 logger.error(f"FFmpeg failed for chunk {i+1}: {result.stderr[:500]}")
@@ -478,7 +496,7 @@ def main():
             print(f"Analyzing {input_file}...", file=sys.stderr)
         
         # Calculate chunk duration based on output format - use same bitrates as encoding
-        base_bitrates = {'high': 192, 'medium': 160, 'low': 128}  # Match the updated quality_settings
+        base_bitrates = {'high': 128, 'medium': 64, 'low': 32}  # Match the quality_settings
         output_bitrate = base_bitrates[args.quality]
         
         chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_format, output_bitrate)
@@ -497,6 +515,21 @@ def main():
         if chunk_duration < 10:
             logger.warning(f"Short chunk duration: {chunk_duration:.2f}s")
             print("Warning: Chunk duration is very short. Consider using a lower quality setting.", file=sys.stderr)
+        
+        # Check if chunks might exceed 25MB limit and adjust format if needed
+        estimated_size = estimate_chunk_size_mb(chunk_duration, output_format, args.quality)
+        if estimated_size > 24 and output_format == 'wav':  # Leave 1MB margin
+            logger.info(f"WAV chunks estimated at {estimated_size:.1f}MB - switching to FLAC")
+            print(f"Note: WAV chunks would be ~{estimated_size:.1f}MB, switching to FLAC for compression", file=sys.stderr)
+            output_format = 'flac'
+            # Recalculate with FLAC format
+            chunk_duration = calculate_chunk_duration(bitrate, max_size_mb, output_format, output_bitrate)
+            num_chunks = math.ceil(duration / chunk_duration)
+            estimated_size = estimate_chunk_size_mb(chunk_duration, output_format, args.quality)
+            
+        if estimated_size > 24:  # Still too large even with FLAC
+            logger.warning(f"Chunks still estimated at {estimated_size:.1f}MB - audio may need lower quality")
+            print(f"Warning: Chunks estimated at {estimated_size:.1f}MB may exceed 25MB limit", file=sys.stderr)
         
         # Split the audio
         logger.info(f"Starting audio split - Format: {output_format}, Quality: {args.quality}, Stream: {args.stream}")
