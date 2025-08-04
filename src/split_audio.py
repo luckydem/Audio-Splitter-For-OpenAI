@@ -70,7 +70,8 @@ def calculate_chunk_duration(bitrate_bps, max_mb, output_format, output_bitrate_
     max_duration = (max_bits / effective_bitrate) * safety_margin
     
     # Minimum chunk duration of 10 seconds to avoid too many tiny files
-    return max(max_duration, 10.0)
+    # Maximum chunk duration of 300 seconds (5 minutes) to avoid processing timeouts
+    return max(min(max_duration, 300.0), 10.0)
 
 def estimate_chunk_size_mb(duration_seconds, output_format, quality='medium'):
     """

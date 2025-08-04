@@ -148,7 +148,7 @@ class DriveFileRequest(BaseModel):
     """Request to process a file from Google Drive"""
     drive_file_id: Optional[str] = Field(None, description="Google Drive file ID")
     drive_file_url: Optional[str] = Field(None, description="Alternative: Google Drive shareable link")
-    max_size_mb: Optional[float] = Field(default=23, description="Maximum chunk size in MB")
+    max_size_mb: Optional[float] = Field(default=10, description="Maximum chunk size in MB")
     output_format: Optional[str] = Field(default="auto", description="Output format: auto, mp3, wav, m4a")
     quality: Optional[str] = Field(default="medium", description="Output quality: low, medium, high")
     webhook_url: Optional[str] = Field(None, description="Webhook URL for completion notification")
@@ -551,7 +551,14 @@ async def process_file_async(
             # Calculate chunk duration - match the bitrates in split_audio.py
             quality_bitrates = {'high': 128, 'medium': 64, 'low': 32}
             output_bitrate = quality_bitrates.get(request.quality, 64)
-            chunk_duration = calculate_chunk_duration(bitrate, request.max_size_mb, output_format, output_bitrate)
+            
+            # Use smaller chunks for WAV format to avoid timeouts
+            effective_max_size = request.max_size_mb
+            if output_format == 'wav' and request.max_size_mb > 10:
+                effective_max_size = 10  # Limit WAV chunks to 10MB
+                logger.info(f"Job {job_id}: Limiting WAV chunk size to 10MB to avoid timeouts")
+                
+            chunk_duration = calculate_chunk_duration(bitrate, effective_max_size, output_format, output_bitrate)
             logger.info(f"Job {job_id}: Calculated chunk_duration={chunk_duration:.2f}s for {duration:.2f}s audio, expecting {math.ceil(duration/chunk_duration)} chunks")
             
             # Split audio
