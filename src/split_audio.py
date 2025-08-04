@@ -198,8 +198,16 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
         stream_mode: Emit JSON for each chunk immediately (for n8n integration)
     """
     split_start_time = datetime.now()
+    
+    if not logger:
+        logger = logging.getLogger('audio_splitter')
+    
+    logger.info(f"[SPLIT_AUDIO] Starting with chunk_duration={chunk_duration}s")
+    
     duration, bitrate, codec_name = get_audio_info(input_file)
     num_chunks = math.ceil(duration / chunk_duration)
+    
+    logger.info(f"[SPLIT_AUDIO] Audio duration={duration:.2f}s, chunk_duration={chunk_duration}s, num_chunks={num_chunks}")
     
     # Quality presets optimized for Whisper API speech transcription
     # Whisper internally uses 16kHz, so we optimize for this
@@ -225,11 +233,16 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
         chunk_start_timestamp = datetime.now()
         start_time = i * chunk_duration
         
+        # Debug: Log the calculation inputs
+        logger.info(f"[CHUNK {i+1}/{num_chunks}] CALC: i={i}, chunk_duration={chunk_duration:.2f}s, start_time={start_time:.2f}s, total_duration={duration:.2f}s")
+        
         # For the last chunk, adjust duration to not exceed file duration
         if i == num_chunks - 1:
             actual_chunk_duration = duration - start_time
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] Last chunk: actual_duration = {duration:.2f} - {start_time:.2f} = {actual_chunk_duration:.2f}s")
         else:
             actual_chunk_duration = chunk_duration
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] Regular chunk: actual_duration = chunk_duration = {actual_chunk_duration:.2f}s")
             
         output_path = os.path.join(output_dir, f'chunk_{i+1:03d}.{output_format}')
         
