@@ -11,13 +11,13 @@ This is an n8n audio processing automation system designed to split large audio 
 ### Audio Splitting
 ```bash
 # Basic usage
-python split_audio.py --input /path/to/audio.wma --output /tmp/
+python src/split_audio.py --input /path/to/audio.wma --output /tmp/
 
 # Optimized with streaming (recommended for n8n workflows)
-python split_audio.py --input file.wma --output /tmp/ --stream
+python src/split_audio.py --input file.wma --output /tmp/ --stream
 
 # With custom settings
-python split_audio.py --input audio.wma --output chunks/ --maxmb 20 --format m4a --quality medium --verbose
+python src/split_audio.py --input audio.wma --output chunks/ --maxmb 20 --format m4a --quality medium --verbose
 ```
 
 ### Virtual Environment
@@ -29,17 +29,17 @@ source .venv/bin/activate
 ### Log Management
 ```bash
 # Keep logs from last 30 days
-python cleanup_logs.py --days 30
+python src/cleanup_logs.py --days 30
 
 # Keep only 10 most recent logs
-python cleanup_logs.py --count 10
+python src/cleanup_logs.py --count 10
 ```
 
 ## Architecture
 
 ### Core Components
 
-1. **split_audio.py**: Main audio splitting script
+1. **src/split_audio.py**: Main audio splitting script
    - Handles multiple input formats (MP3, WAV, FLAC, OGG, M4A, WMA)
    - Smart format selection for Pi 4 performance (WMA→WAV is 5-10x faster than WMA→M4A)
    - Supports streaming JSON output for immediate chunk availability
@@ -101,3 +101,31 @@ sudo apt-get install ffmpeg  # Debian/Ubuntu/Raspberry Pi OS
 ## Logging and Monitoring
 
 - Use the cloud run log monitor agent every time I want to monitor logs
+
+## Project Structure
+
+The project follows best practices with organized folder structure:
+
+- **src/**: Core application source code (audio_splitter_drive.py, split_audio.py)
+- **tests/**: All test scripts and diagnostic tools
+- **config/**: Configuration files (service-account-key.json)
+- **deployment/**: Docker, Cloud Build, and deployment scripts
+- **docs/**: Documentation and setup guides
+- **workflows/**: External platform integrations (n8n workflows)
+- **scripts/**: Development utilities and setup scripts
+- **legacy/**: Deprecated code kept for reference
+
+### Development Commands
+
+```bash
+# Setup development environment
+./scripts/setup-dev.sh
+
+# Run tests
+python tests/test_enhanced_endpoint.py
+
+# Deploy to Cloud Run
+./deployment/deploy.sh
+```
+
+See PROJECT_STRUCTURE.md for detailed folder organization.

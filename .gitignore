@@ -46,3 +46,19 @@ logs/
 
 # Sample Files
 sample-files/
+
+# Configuration (sensitive files)
+config/service-account-key.json
+*.key
+*.pem
+.env
+.env.local
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Testing artifacts
+test_results/
+coverage/

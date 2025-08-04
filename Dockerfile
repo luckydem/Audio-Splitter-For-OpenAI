@@ -14,9 +14,9 @@ COPY requirements-production.txt .
 RUN pip install --no-cache-dir -r requirements-production.txt
 
 # Copy application code
-COPY split_audio.py .
-COPY audio_splitter_drive.py .
-COPY service-account-key.json .
+COPY src/split_audio.py .
+COPY src/audio_splitter_drive.py .
+COPY config/service-account-key.json .
 
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /tmp/audio_splits

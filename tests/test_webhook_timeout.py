@@ -12,7 +12,7 @@ from datetime import datetime
 import time
 
 # Add the current directory to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 try:
     from audio_splitter_drive import send_webhook, test_webhook_connectivity
