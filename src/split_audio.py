@@ -224,6 +224,13 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     for i in range(num_chunks):
         chunk_start_timestamp = datetime.now()
         start_time = i * chunk_duration
+        
+        # For the last chunk, adjust duration to not exceed file duration
+        if i == num_chunks - 1:
+            actual_chunk_duration = duration - start_time
+        else:
+            actual_chunk_duration = chunk_duration
+            
         output_path = os.path.join(output_dir, f'chunk_{i+1:03d}.{output_format}')
         
         # Stream mode: emit JSON immediately for n8n
@@ -233,7 +240,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                 "total_chunks": num_chunks,
                 "output_path": output_path,
                 "start_time": start_time,
-                "duration": chunk_duration,
+                "duration": actual_chunk_duration,
                 "status": "processing"
             }
             print(json.dumps(chunk_info), flush=True)
@@ -242,10 +249,13 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
             print(f"Exporting {output_path}")
         
         logger.info(f"[CHUNK {i+1}/{num_chunks}] Starting processing")
-        logger.info(f"[CHUNK {i+1}/{num_chunks}] Start time: {start_time:.2f}s, Duration: {chunk_duration:.2f}s")
+        logger.info(f"[CHUNK {i+1}/{num_chunks}] Start time: {start_time:.2f}s, Duration: {actual_chunk_duration:.2f}s")
         logger.info(f"[CHUNK {i+1}/{num_chunks}] Output: {output_path}")
         
         try:
+            # Debug logging to catch the issue
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] DEBUG: start_time={start_time}, actual_chunk_duration={actual_chunk_duration}")
+            
             # Build ffmpeg command based on output format
             if output_format == 'mp3':
                 cmd = [
@@ -253,7 +263,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',  # Overwrite output files
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',  # No video
                     '-c:a', 'libmp3lame',  # MP3 codec
                     '-b:a', settings['bitrate'],  # Audio bitrate
@@ -269,7 +279,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'pcm_s16le',  # 16-bit PCM
                     '-ar', '16000',       # 16kHz for speech (Whisper native)
@@ -282,7 +292,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'aac',
                     '-b:a', settings['bitrate'],
@@ -296,7 +306,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'flac',
                     '-ar', '16000',      # 16kHz for speech
@@ -310,7 +320,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'libvorbis',
                     '-b:a', settings['bitrate'],
@@ -324,7 +334,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'libopus',
                     '-b:a', settings['bitrate'],
@@ -338,7 +348,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     '-y',
                     '-i', input_file,
                     '-ss', str(start_time),
-                    '-t', str(chunk_duration),
+                    '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'aac',
                     '-b:a', settings['bitrate'],

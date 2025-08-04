@@ -14,6 +14,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from urllib.parse import urlparse
+import math
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -547,10 +548,11 @@ async def process_file_async(
                 if output_format == "ogg":
                     output_format = "m4a"  # Better OpenAI compatibility
             
-            # Calculate chunk duration
-            quality_bitrates = {'high': 128, 'medium': 96, 'low': 64}
-            output_bitrate = quality_bitrates.get(request.quality, 96)
+            # Calculate chunk duration - match the bitrates in split_audio.py
+            quality_bitrates = {'high': 128, 'medium': 64, 'low': 32}
+            output_bitrate = quality_bitrates.get(request.quality, 64)
             chunk_duration = calculate_chunk_duration(bitrate, request.max_size_mb, output_format, output_bitrate)
+            logger.info(f"Job {job_id}: Calculated chunk_duration={chunk_duration:.2f}s for {duration:.2f}s audio, expecting {math.ceil(duration/chunk_duration)} chunks")
             
             # Split audio
             with tempfile.TemporaryDirectory() as chunk_temp_dir:
@@ -935,9 +937,9 @@ async def process_drive_file(
             # Quick analysis for estimates
             duration, bitrate, _ = get_audio_info(temp_input)
             
-            # Calculate estimated chunks
-            quality_bitrates = {'high': 128, 'medium': 96, 'low': 64}
-            output_bitrate = quality_bitrates.get(request.quality, 96)
+            # Calculate estimated chunks - match the bitrates in split_audio.py
+            quality_bitrates = {'high': 128, 'medium': 64, 'low': 32}
+            output_bitrate = quality_bitrates.get(request.quality, 64)
             chunk_duration = calculate_chunk_duration(bitrate, request.max_size_mb, "m4a", output_bitrate)
             estimated_chunks = max(1, int(duration / chunk_duration) + 1)
             
