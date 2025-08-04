@@ -49,10 +49,21 @@ sample-files/
 
 # Configuration (sensitive files)
 config/service-account-key.json
+service-account-key.json
+*service-account*.json
 *.key
 *.pem
 .env
 .env.local
+.env.*
+*credentials*.json
+*secret*.json
+
+# API Keys and tokens
+*api-key*
+*api_key*
+*token*
+sk-*
 
 # Temporary files
 temp/
