@@ -207,6 +207,35 @@ When deploying or updating services:
 - Add job queue for very large files
 - Implement circuit breaker patterns for reliability
 
+## 🔮 Planned Migration (Priority Task)
+
+### Project Migration to DriveScribe
+**Status**: Planned for next development session
+**Goal**: Move from `duhworks` to dedicated `drivescribe` project
+
+#### Key Changes:
+- **Project ID**: `duhworks` → `drivescribe`
+- **Service Account**: `audio-splitter-drive@duhworks.iam.gserviceaccount.com` → `transcribe@drivescribe.iam.gserviceaccount.com`  
+- **GCS Bucket**: `audio-splitter-uploads` → `drivescribe-audio-temp`
+- **Services**: Clean deployment in dedicated project
+
+#### Impact on Development:
+- All deployment scripts need PROJECT_ID updates
+- New service account key will be required
+- GCS configuration changes in both services
+- n8n webhook URLs will change
+- Documentation updates required
+
+#### Migration Priority:
+1. **Create new GCP project** and enable APIs
+2. **Set up service account** with proper permissions
+3. **Update deployment scripts** for both services
+4. **Test migration** with non-production workflows
+5. **Coordinate with n8n** for webhook URL updates
+6. **Full end-to-end testing** before switching production
+
+**⚠️ Remember**: Keep old services running during migration for rollback safety.
+
 ---
 
 ## 🤖 Claude Code Instructions

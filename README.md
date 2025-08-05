@@ -158,8 +158,81 @@ gcloud run services logs read audio-transcriber-assemblyai --region us-central1 
 3. **Cost optimization**: Monitor usage and adjust retention policies
 4. **Feature expansion**: Add more AssemblyAI features (speaker diarization, summaries)
 
+## 🔮 Planned Migration (Future Work)
+
+### Project Migration Plan
+**Goal**: Move from shared `duhworks` project to dedicated `DriveScribe` project with proper naming.
+
+#### Current State:
+- **Project**: `duhworks` (shared project)
+- **Service Account**: `audio-splitter-drive@duhworks.iam.gserviceaccount.com`
+- **GCS Bucket**: `audio-splitter-uploads` (in duhworks)
+- **Services**: Deployed in `duhworks` project
+
+#### Target State:
+- **Project**: `drivescribe` (dedicated project)
+- **Service Account**: `transcribe@drivescribe.iam.gserviceaccount.com`
+- **GCS Bucket**: `drivescribe-audio-temp` 
+- **Services**: Clean deployment in dedicated project
+
+#### Migration Steps:
+1. **Create new GCP project**: `drivescribe`
+2. **Enable required APIs**:
+   ```bash
+   gcloud services enable run.googleapis.com
+   gcloud services enable cloudbuild.googleapis.com
+   gcloud services enable artifactregistry.googleapis.com
+   gcloud services enable storage.googleapis.com
+   gcloud services enable drive.googleapis.com
+   ```
+3. **Create service account**:
+   ```bash
+   gcloud iam service-accounts create transcribe \
+     --display-name="DriveScribe Transcription Service" \
+     --project=drivescribe
+   ```
+4. **Update deployment scripts**:
+   - Change PROJECT_ID in both `deploy.sh` files
+   - Update service account references
+   - Update GCS bucket names
+5. **Create new GCS bucket** with lifecycle rules
+6. **Update Google Drive sharing**:
+   - Share folders with `transcribe@drivescribe.iam.gserviceaccount.com`
+   - Remove old service account access
+7. **Update n8n workflows** with new service URLs
+8. **Download new service account key**
+9. **Test migration** with non-production files
+10. **Switch DNS/URLs** if using custom domains
+
+#### Benefits:
+- ✅ **Clean separation** from other duhworks services
+- ✅ **Proper naming** that reflects the service purpose
+- ✅ **Dedicated billing** for cost tracking
+- ✅ **Independent scaling** and resource management
+- ✅ **Better security** with isolated service account
+
+#### Migration Checklist:
+- [ ] Create `drivescribe` GCP project
+- [ ] Set up Artifact Registry for Docker images
+- [ ] Create `transcribe@drivescribe.iam.gserviceaccount.com`
+- [ ] Update both deployment scripts with new project
+- [ ] Create new GCS bucket with lifecycle rules
+- [ ] Generate and download new service account key
+- [ ] Update `config/service-account-key.json`
+- [ ] Share Google Drive folders with new service account
+- [ ] Deploy services to new project
+- [ ] Update n8n webhook URLs
+- [ ] Test end-to-end workflow
+- [ ] Update documentation with new URLs
+- [ ] Clean up old resources in duhworks project
+
+**Estimated Time**: 2-3 hours  
+**Risk Level**: Medium (requires coordination with n8n workflows)  
+**Rollback Plan**: Keep old services running until migration verified
+
 ---
 
 **Last Updated**: August 2025  
 **Active Service**: AssemblyAI Transcriber  
-**Status**: Production Ready ✅
+**Status**: Production Ready ✅  
+**Next Migration**: Move to dedicated `drivescribe` project 🎯
