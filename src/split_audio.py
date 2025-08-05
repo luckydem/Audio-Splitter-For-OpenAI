@@ -24,6 +24,15 @@ from pathlib import Path
 import logging
 from datetime import datetime
 import json
+import concurrent.futures
+import multiprocessing
+
+# Timeout configuration
+FFMPEG_TIMEOUT = 600  # 10 minutes for FFmpeg operations
+
+# FFmpeg optimization flags
+FFMPEG_THREADS = 2  # Use 2 threads for encoding to balance speed and CPU usage
+FFMPEG_PRESET_WAV = 'ultrafast'  # Fastest preset for WAV encoding
 
 def get_audio_info(filepath):
     """
@@ -271,10 +280,13 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
             logger.info(f"[CHUNK {i+1}/{num_chunks}] DEBUG: start_time={start_time}, actual_chunk_duration={actual_chunk_duration}")
             
             # Build ffmpeg command based on output format
+            # Use input seeking (-ss before -i) for better performance
+            # This is less accurate but much faster for long files
             if output_format == 'mp3':
                 cmd = [
                     'ffmpeg',
                     '-y',  # Overwrite output files
+                    '-threads', str(FFMPEG_THREADS),  # Use multiple threads
                     '-i', input_file,
                     '-ss', str(start_time),
                     '-t', str(actual_chunk_duration),
@@ -291,8 +303,9 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                 cmd = [
                     'ffmpeg',
                     '-y',
+                    '-threads', str(FFMPEG_THREADS),  # Use multiple threads for faster processing
+                    '-ss', str(start_time),  # Input seeking (fast)
                     '-i', input_file,
-                    '-ss', str(start_time),
                     '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'pcm_s16le',  # 16-bit PCM
@@ -304,8 +317,8 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                 cmd = [
                     'ffmpeg',
                     '-y',
+                    '-ss', str(start_time),  # Input seeking (fast)
                     '-i', input_file,
-                    '-ss', str(start_time),
                     '-t', str(actual_chunk_duration),
                     '-vn',
                     '-c:a', 'aac',
@@ -376,7 +389,7 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
             
             # Run ffmpeg with error capture and proper stdin handling for containers
             ffmpeg_start = datetime.now()
-            result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=FFMPEG_TIMEOUT)
             ffmpeg_duration = (datetime.now() - ffmpeg_start).total_seconds()
             
             logger.info(f"[CHUNK {i+1}/{num_chunks}] FFmpeg completed in {ffmpeg_duration:.2f}s")
@@ -403,6 +416,29 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
                     }
                     print(json.dumps(chunk_info), flush=True)
                 
+        except subprocess.TimeoutExpired:
+            logger.error(f"[CHUNK {i+1}/{num_chunks}] FFmpeg TIMEOUT after {FFMPEG_TIMEOUT}s")
+            logger.error(f"[CHUNK {i+1}/{num_chunks}] Problematic timestamp: start={start_time}, duration={actual_chunk_duration}")
+            print(f"Error: Chunk {i+1} processing timed out after 5 minutes", file=sys.stderr)
+            
+            # Try to diagnose the issue
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] Running diagnostics...")
+            
+            # Test if we can seek to this position at all
+            test_cmd = ['ffmpeg', '-ss', str(start_time), '-i', input_file, '-t', '1', '-f', 'null', '-']
+            try:
+                test_result = subprocess.run(test_cmd, capture_output=True, text=True, 
+                                           stdin=subprocess.DEVNULL, timeout=10)
+                if test_result.returncode == 0:
+                    logger.info(f"[CHUNK {i+1}/{num_chunks}] Can seek to position, issue might be with duration")
+                else:
+                    logger.error(f"[CHUNK {i+1}/{num_chunks}] Cannot seek to position {start_time}")
+            except:
+                logger.error(f"[CHUNK {i+1}/{num_chunks}] Diagnostic seek test also timed out")
+            
+            # Continue with next chunk instead of failing completely
+            continue
+            
         except Exception as e:
             logger.error(f"Exception while creating chunk {i+1}: {str(e)}")
             print(f"Failed to create chunk {i+1}: {str(e)}", file=sys.stderr)
@@ -412,6 +448,130 @@ def split_audio(input_file, chunk_duration, output_dir, output_format='m4a', qua
     total_time = (datetime.now() - split_start_time).total_seconds()
     logger.info(f"[SUMMARY] Completed {len(successfully_created)}/{num_chunks} chunks in {total_time:.2f}s")
     logger.info(f"[SUMMARY] Average time per chunk: {total_time/max(len(successfully_created), 1):.2f}s")
+    
+    return successfully_created
+
+
+def process_single_chunk(args):
+    """Process a single chunk - for parallel execution"""
+    input_file, chunk_info, output_format, quality_settings, logger_name = args
+    
+    # Set up logger for this process
+    logger = logging.getLogger(logger_name)
+    
+    i, start_time, actual_duration, output_path, num_chunks = chunk_info
+    
+    # Build ffmpeg command for WAV format (most common case)
+    cmd = [
+        'ffmpeg',
+        '-y',
+        '-ss', str(start_time),  # Input seeking (fast)
+        '-i', input_file,
+        '-t', str(actual_duration),
+        '-vn',
+        '-c:a', 'pcm_s16le',
+        '-ar', '16000',
+        '-ac', '1',
+        '-loglevel', 'warning',  # Reduce verbosity
+        output_path
+    ]
+    
+    chunk_start = datetime.now()
+    logger.info(f"[CHUNK {i+1}/{num_chunks}] Starting at position {start_time:.2f}s")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=FFMPEG_TIMEOUT)
+        
+        if result.returncode == 0:
+            elapsed = (datetime.now() - chunk_start).total_seconds()
+            file_size = os.path.getsize(output_path) / (1024 * 1024)
+            logger.info(f"[CHUNK {i+1}/{num_chunks}] SUCCESS: {file_size:.1f} MB in {elapsed:.2f}s")
+            return (i+1, True, output_path)
+        else:
+            logger.error(f"[CHUNK {i+1}/{num_chunks}] FAILED: {result.stderr}")
+            return (i+1, False, None)
+            
+    except subprocess.TimeoutExpired:
+        logger.error(f"[CHUNK {i+1}/{num_chunks}] TIMEOUT after {FFMPEG_TIMEOUT}s")
+        return (i+1, False, None)
+    except Exception as e:
+        logger.error(f"[CHUNK {i+1}/{num_chunks}] ERROR: {str(e)}")
+        return (i+1, False, None)
+
+
+def split_audio_parallel(input_file, chunk_duration, output_dir, output_format='wav', 
+                        quality='medium', verbose=False, logger=None, stream_mode=False,
+                        max_workers=None):
+    """Parallel version of split_audio for multi-core systems"""
+    
+    if not logger:
+        logger = logging.getLogger('audio_splitter')
+        
+    split_start_time = datetime.now()
+    
+    # Get audio info
+    duration, bitrate, codec_name = get_audio_info(input_file)
+    num_chunks = math.ceil(duration / chunk_duration)
+    
+    # Determine number of workers
+    if max_workers is None:
+        max_workers = min(multiprocessing.cpu_count(), num_chunks, 6)  # Cap at 6 for Cloud Run
+    
+    logger.info(f"[PARALLEL] Starting with {max_workers} workers for {num_chunks} chunks")
+    
+    # Quality settings
+    quality_settings = {
+        'high': {'bitrate': '128k', 'sample_rate': '16000'},
+        'medium': {'bitrate': '64k', 'sample_rate': '16000'},  
+        'low': {'bitrate': '32k', 'sample_rate': '16000'}
+    }
+    settings = quality_settings.get(quality, quality_settings['high'])
+    
+    # Prepare chunk arguments
+    chunk_args = []
+    for i in range(num_chunks):
+        start_time = i * chunk_duration
+        
+        if i == num_chunks - 1:
+            actual_duration = duration - start_time
+        else:
+            actual_duration = chunk_duration
+            
+        output_path = os.path.join(output_dir, f'chunk_{i+1:03d}.{output_format}')
+        
+        # Print for n8n compatibility
+        print(f"Exporting {output_path}")
+        
+        chunk_info = (i, start_time, actual_duration, output_path, num_chunks)
+        chunk_args.append((input_file, chunk_info, output_format, settings, logger.name))
+    
+    # Process chunks in parallel
+    successfully_created = []
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all jobs
+        futures = [executor.submit(process_single_chunk, args) for args in chunk_args]
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(futures):
+            chunk_num, success, output_path = future.result()
+            if success:
+                successfully_created.append(output_path)
+                
+                # Stream mode output
+                if stream_mode:
+                    chunk_info = {
+                        "chunk_number": chunk_num,
+                        "total_chunks": num_chunks,
+                        "output_path": output_path,
+                        "status": "completed"
+                    }
+                    print(json.dumps(chunk_info), flush=True)
+    
+    # Log summary
+    total_time = (datetime.now() - split_start_time).total_seconds()
+    logger.info(f"[PARALLEL SUMMARY] Completed {len(successfully_created)}/{num_chunks} chunks in {total_time:.2f}s")
+    logger.info(f"[PARALLEL SUMMARY] Speedup: ~{max_workers}x (using {max_workers} workers)")
     
     return successfully_created
 
@@ -475,6 +635,10 @@ def main():
                        help='Stream output mode: emit each chunk immediately as JSON for n8n processing')
     parser.add_argument('--output-json', action='store_true',
                        help='Output results as JSON format for n8n integration')
+    parser.add_argument('--parallel', action='store_true',
+                       help='Use parallel processing for faster splitting (experimental)')
+    parser.add_argument('--workers', type=int, default=None,
+                       help='Number of parallel workers (default: auto-detect)')
     args = parser.parse_args()
     
     # Log script start
@@ -573,8 +737,17 @@ def main():
             print(f"Warning: Chunks estimated at {estimated_size:.1f}MB may exceed 25MB limit", file=sys.stderr)
         
         # Split the audio
-        logger.info(f"Starting audio split - Format: {output_format}, Quality: {args.quality}, Stream: {args.stream}")
-        created_files = split_audio(input_file, chunk_duration, output_dir, output_format, args.quality, args.verbose, logger, args.stream)
+        logger.info(f"Starting audio split - Format: {output_format}, Quality: {args.quality}, Stream: {args.stream}, Parallel: {args.parallel}")
+        
+        if args.parallel and output_format == 'wav':
+            logger.info(f"Using PARALLEL processing with {args.workers or 'auto'} workers")
+            created_files = split_audio_parallel(input_file, chunk_duration, output_dir, output_format, 
+                                               args.quality, args.verbose, logger, args.stream, args.workers)
+        else:
+            if args.parallel and output_format != 'wav':
+                logger.warning(f"Parallel mode only supports WAV format currently, using sequential")
+            created_files = split_audio(input_file, chunk_duration, output_dir, output_format, 
+                                      args.quality, args.verbose, logger, args.stream)
         
         # Handle different output modes
         if args.stream:

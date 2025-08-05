@@ -12,11 +12,9 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial, wraps
+from functools import partial
 from urllib.parse import urlparse
 import math
-import random
-import time
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -34,87 +32,6 @@ from split_audio import split_audio, split_audio_parallel, get_audio_info, get_o
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Timeout configurations
-OPENAI_API_TIMEOUT = 600  # 10 minutes to match Cloud Run timeout
-OPENAI_CONNECT_TIMEOUT = 30  # 30 seconds to establish connection
-OPENAI_READ_TIMEOUT = 300  # 5 minutes to read response
-FFMPEG_TIMEOUT = 600  # 10 minutes for FFmpeg operations
-GCS_UPLOAD_TIMEOUT = 120  # 2 minutes for GCS uploads
-
-# Retry configurations
-OPENAI_MAX_RETRIES = 5
-OPENAI_RETRY_DELAYS = [2, 4, 8, 16, 32]  # Exponential backoff with max 32s
-NETWORK_ERROR_CODES = {408, 429, 500, 502, 503, 504}  # Codes to retry
-
-# Connection pool configuration
-CONNECTION_LIMIT = 20  # Increased to handle parallel uploads to GCS
-CONNECTION_LIMIT_PER_HOST = 10  # Increased for storage.googleapis.com
-
-# Chunk size limits by format
-CHUNK_SIZE_LIMITS = {
-    'wav': 5,    # Reduced from 10MB to 5MB for faster processing
-    'm4a': 20,   # Keep at 20MB for m4a
-    'mp3': 20,   # Keep at 20MB for mp3
-    'default': 10
-}
-
-def with_retry(max_retries=OPENAI_MAX_RETRIES, delays=OPENAI_RETRY_DELAYS, 
-               retry_on_exceptions=(aiohttp.ClientError, asyncio.TimeoutError),
-               retry_on_status_codes=NETWORK_ERROR_CODES):
-    """
-    Decorator for retrying async functions with exponential backoff
-    """
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            last_exception = None
-            
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                    
-                except Exception as e:
-                    last_exception = e
-                    
-                    # Check if we should retry this exception
-                    should_retry = False
-                    
-                    # Check for specific exception types
-                    if isinstance(e, retry_on_exceptions):
-                        should_retry = True
-                        logger.warning(f"{func.__name__} attempt {attempt + 1} failed with {type(e).__name__}: {str(e)}")
-                    
-                    # Check for HTTP status codes in aiohttp responses
-                    elif hasattr(e, 'status') and e.status in retry_on_status_codes:
-                        should_retry = True
-                        logger.warning(f"{func.__name__} attempt {attempt + 1} failed with status {e.status}")
-                    
-                    # Special handling for rate limits
-                    elif hasattr(e, 'status') and e.status == 429:
-                        should_retry = True
-                        # Try to extract retry-after header
-                        retry_after = getattr(e, 'headers', {}).get('Retry-After', delays[min(attempt, len(delays)-1)])
-                        logger.warning(f"{func.__name__} rate limited, waiting {retry_after}s")
-                        await asyncio.sleep(float(retry_after))
-                        continue
-                    
-                    if not should_retry or attempt >= max_retries - 1:
-                        raise
-                    
-                    # Calculate delay with jitter
-                    delay = delays[min(attempt, len(delays)-1)]
-                    jitter = random.uniform(0, delay * 0.1)  # 10% jitter
-                    total_delay = delay + jitter
-                    
-                    logger.info(f"{func.__name__} retrying in {total_delay:.1f}s (attempt {attempt + 2}/{max_retries})")
-                    await asyncio.sleep(total_delay)
-            
-            # If we get here, all retries failed
-            raise last_exception
-            
-        return wrapper
-    return decorator
 
 app = FastAPI(
     title="Audio Splitter - Google Drive Integration",
@@ -179,27 +96,12 @@ def needs_splitting(file_path: str, file_size_bytes: int, original_filename: str
     
     return not (is_compatible_format and is_under_size_limit)
 
-@with_retry()
 async def transcribe_file_directly(file_path: str, api_key: str) -> Dict:
-    """Transcribe a file directly without splitting with retry logic"""
+    """Transcribe a file directly without splitting"""
     logger.info(f"Transcribing file directly: {os.path.basename(file_path)}")
     start_time = datetime.now()
     
-    # Create connector with connection pooling
-    connector = aiohttp.TCPConnector(
-        limit=CONNECTION_LIMIT,
-        limit_per_host=CONNECTION_LIMIT_PER_HOST,
-        force_close=True
-    )
-    
-    # Create timeout config
-    timeout_config = aiohttp.ClientTimeout(
-        total=OPENAI_API_TIMEOUT,
-        sock_connect=OPENAI_CONNECT_TIMEOUT,
-        sock_read=OPENAI_READ_TIMEOUT
-    )
-    
-    async with aiohttp.ClientSession(timeout=timeout_config, connector=connector) as session:
+    async with aiohttp.ClientSession() as session:
         with open(file_path, 'rb') as audio_file:
             audio_data = audio_file.read()
             filename = os.path.basename(file_path)
@@ -438,23 +340,8 @@ async def transcribe_chunks_parallel(chunks: List[Dict], api_key: str) -> List[D
     start_time = datetime.now()
     logger.info(f"Starting parallel transcription of {len(chunks)} chunks")
     
-    # Create connector with connection pooling
-    connector = aiohttp.TCPConnector(
-        limit=CONNECTION_LIMIT,
-        limit_per_host=CONNECTION_LIMIT_PER_HOST,
-        force_close=True  # Force close connections to avoid hanging
-    )
-    
-    # Create timeout config with longer timeouts
-    timeout_config = aiohttp.ClientTimeout(
-        total=OPENAI_API_TIMEOUT,
-        sock_connect=OPENAI_CONNECT_TIMEOUT,
-        sock_read=OPENAI_READ_TIMEOUT
-    )
-    
     async with aiohttp.ClientSession(
-        timeout=timeout_config,
-        connector=connector
+        timeout=aiohttp.ClientTimeout(total=300)  # 5 minute timeout
     ) as session:
         tasks = []
         for i, chunk in enumerate(chunks):
@@ -502,9 +389,8 @@ async def transcribe_chunks_parallel(chunks: List[Dict], api_key: str) -> List[D
             logger.error(f"Fatal error in parallel transcription after {total_time:.1f}s: {str(e)}")
             raise
 
-@with_retry()
 async def transcribe_single_chunk(session: aiohttp.ClientSession, chunk: Dict, api_key: str) -> Dict:
-    """Transcribe a single chunk using OpenAI API with retry logic"""
+    """Transcribe a single chunk using OpenAI API"""
     chunk_num = chunk['chunk_number']
     filename = chunk['filename']
     download_url = chunk['download_url']
@@ -666,11 +552,11 @@ async def process_file_async(
             quality_bitrates = {'high': 128, 'medium': 64, 'low': 32}
             output_bitrate = quality_bitrates.get(request.quality, 64)
             
-            # Use format-specific chunk size limits to avoid timeouts
-            format_limit = CHUNK_SIZE_LIMITS.get(output_format, CHUNK_SIZE_LIMITS['default'])
-            effective_max_size = min(request.max_size_mb, format_limit)
-            if effective_max_size != request.max_size_mb:
-                logger.info(f"Job {job_id}: Limiting {output_format.upper()} chunk size to {effective_max_size}MB to avoid timeouts")
+            # Use smaller chunks for WAV format to avoid timeouts
+            effective_max_size = request.max_size_mb
+            if output_format == 'wav' and request.max_size_mb > 10:
+                effective_max_size = 10  # Limit WAV chunks to 10MB
+                logger.info(f"Job {job_id}: Limiting WAV chunk size to 10MB to avoid timeouts")
                 
             chunk_duration = calculate_chunk_duration(bitrate, effective_max_size, output_format, output_bitrate)
             logger.info(f"Job {job_id}: Calculated chunk_duration={chunk_duration:.2f}s for {duration:.2f}s audio, expecting {math.ceil(duration/chunk_duration)} chunks")
@@ -695,7 +581,7 @@ async def process_file_async(
                         False,  # verbose
                         logger,  # pass logger for parallel mode
                         False,   # stream_mode
-                        8        # max_workers - use all 8 CPUs for maximum performance
+                        6        # max_workers - use 6 on our 8-CPU instance
                     )
                 else:
                     created_files = await loop.run_in_executor(
@@ -893,27 +779,12 @@ async def process_chunk_with_transcription(
             "error": str(e)
         }
 
-@with_retry()
 async def transcribe_single_chunk_direct(file_path: str, chunk_number: int, duration: float, api_key: str) -> Dict:
-    """Transcribe a chunk directly from file path with retry logic"""
+    """Transcribe a chunk directly from file path"""
     logger.info(f"Transcribing chunk {chunk_number} directly from file")
     start_time = datetime.now()
     
-    # Create connector with connection pooling
-    connector = aiohttp.TCPConnector(
-        limit=CONNECTION_LIMIT,
-        limit_per_host=CONNECTION_LIMIT_PER_HOST,
-        force_close=True
-    )
-    
-    # Create timeout config
-    timeout_config = aiohttp.ClientTimeout(
-        total=OPENAI_API_TIMEOUT,
-        sock_connect=OPENAI_CONNECT_TIMEOUT,
-        sock_read=OPENAI_READ_TIMEOUT
-    )
-    
-    async with aiohttp.ClientSession(timeout=timeout_config, connector=connector) as session:
+    async with aiohttp.ClientSession() as session:
         with open(file_path, 'rb') as audio_file:
             audio_data = audio_file.read()
             filename = os.path.basename(file_path)

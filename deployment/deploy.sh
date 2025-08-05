@@ -61,10 +61,11 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:audio-splitter-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.objectAdmin"
 
-# Update Cloud Run service to use service account
+# Update Cloud Run service to use service account and ensure timeout is set
 gcloud run services update $SERVICE_NAME \
   --service-account=audio-splitter-sa@$PROJECT_ID.iam.gserviceaccount.com \
-  --region=$REGION
+  --region=$REGION \
+  --timeout=3600
 
 echo "Deployment complete!"
 echo ""
