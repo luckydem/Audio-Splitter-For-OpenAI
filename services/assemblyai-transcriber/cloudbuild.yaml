@@ -1,0 +1,53 @@
+# Cloud Build configuration for AssemblyAI transcription service
+# Simplified deployment - no FFmpeg or heavy dependencies
+
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'us-central1-docker.pkg.dev/${PROJECT_ID}/audio-splitter/audio-transcriber-assemblyai:latest',
+      '-f', 'Dockerfile.assemblyai',
+      '.'
+    ]
+
+  # Push the image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'us-central1-docker.pkg.dev/${PROJECT_ID}/audio-splitter/audio-transcriber-assemblyai']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'audio-transcriber-assemblyai'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/audio-splitter/audio-transcriber-assemblyai:latest'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '512Mi'  # Much less memory needed
+      - '--cpu'
+      - '1'      # Less CPU needed
+      - '--timeout'
+      - '300'    # 5 minutes is plenty
+      - '--concurrency'
+      - '100'    # Can handle many concurrent requests
+      - '--max-instances'
+      - '10'
+      - '--set-env-vars'
+      - 'ASSEMBLYAI_API_KEY=${_ASSEMBLYAI_API_KEY},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME}'
+      - '--service-account'
+      - 'audio-splitter-drive@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--allow-unauthenticated'  # Or use --no-allow-unauthenticated for auth
+
+# Substitutions (set these in Cloud Build trigger or command line)
+substitutions:
+  _ASSEMBLYAI_API_KEY: 'your-assemblyai-api-key-here'  # Override in trigger
+  _GCS_BUCKET_NAME: 'audio-splitter-uploads'  # Override if using different bucket
+
+# Build timeout
+timeout: '1200s'  # 20 minutes

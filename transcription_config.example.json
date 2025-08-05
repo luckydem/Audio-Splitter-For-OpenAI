@@ -1,0 +1,32 @@
+{
+  "openai": {
+    "enabled": true,
+    "api_key": null,
+    "model": "whisper-1",
+    "language": null,
+    "features": {}
+  },
+  "assemblyai": {
+    "enabled": true,
+    "api_key": null,
+    "model": "universal",
+    "language": null,
+    "features": {
+      "speaker_diarization": true,
+      "auto_chapters": false,
+      "entity_detection": false,
+      "sentiment_analysis": false
+    }
+  },
+  "selection_strategy": "auto",
+  "default_provider": "assemblyai",
+  "small_file_threshold": 25.0,
+  "large_file_threshold": 100.0,
+  "require_speaker_diarization": false,
+  "require_word_timestamps": true,
+  "require_language_detection": true,
+  "max_cost_per_hour": null,
+  "prefer_free_tier": false,
+  "max_processing_time_ratio": 0.5,
+  "allow_chunking": true
+}

@@ -1,0 +1,23 @@
+# Simplified requirements for AssemblyAI service
+# Much smaller than the original since we don't need audio processing libraries
+
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# HTTP client
+aiohttp==3.9.1
+requests==2.31.0
+
+# Google APIs
+google-api-python-client==2.108.0
+google-auth==2.23.4
+google-auth-httplib2==0.1.1
+google-cloud-storage==2.10.0
+
+# Logging and utilities
+python-json-logger==2.0.7
+
+# For health checks
+httpx==0.25.2

@@ -49,8 +49,8 @@ sleep 10
 
 # Create service account for Cloud Run (optional - for authenticated access)
 echo "Creating service account..."
-gcloud iam service-accounts create audio-splitter-sa \
-  --display-name="Audio Splitter Service Account" 2>/dev/null || echo "Service account already exists"
+gcloud iam service-accounts create audio-splitter-drive \
+  --display-name="Audio Splitter Drive Service Account" 2>/dev/null || echo "Service account already exists"
 
 # Wait for service account to be created
 sleep 5
@@ -58,12 +58,12 @@ sleep 5
 # Grant necessary permissions
 echo "Granting permissions..."
 gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:audio-splitter-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --member="serviceAccount:audio-splitter-drive@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.objectAdmin"
 
 # Update Cloud Run service to use service account and ensure timeout is set
 gcloud run services update $SERVICE_NAME \
-  --service-account=audio-splitter-sa@$PROJECT_ID.iam.gserviceaccount.com \
+  --service-account=audio-splitter-drive@$PROJECT_ID.iam.gserviceaccount.com \
   --region=$REGION \
   --timeout=3600
 
